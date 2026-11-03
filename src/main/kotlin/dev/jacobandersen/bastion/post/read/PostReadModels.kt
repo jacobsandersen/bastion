@@ -42,6 +42,11 @@ data class PostFeedQuery(
     val day: Int? = null,
 )
 
+data class PostFeedPage(
+    val posts: List<PostView>,
+    val total: Long,
+)
+
 data class TagView(
     val tag: String,
     val count: Int,

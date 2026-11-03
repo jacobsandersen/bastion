@@ -42,7 +42,7 @@ class PublicPostController(
     ): FeedResponse {
         val effectiveLimit = limit ?: 10
         val effectiveOffset = offset ?: 0
-        val posts =
+        val page =
             postReadService.feed(
                 PostFeedQuery(
                     h = h,
@@ -55,6 +55,7 @@ class PublicPostController(
                     day = day,
                 ),
             )
+        val posts = page.posts
         val postIds = posts.map { it.id }
         val webmentions = webmentionReadService.byPostIds(postIds)
         val syndications = postReadService.syndicationLinksByPostIds(postIds)
@@ -75,7 +76,8 @@ class PublicPostController(
                     limit = effectiveLimit,
                     offset = effectiveOffset,
                     count = items.size,
-                    hasMore = items.size == effectiveLimit,
+                    total = page.total,
+                    hasMore = (effectiveOffset + items.size) < page.total,
                 ),
         )
     }

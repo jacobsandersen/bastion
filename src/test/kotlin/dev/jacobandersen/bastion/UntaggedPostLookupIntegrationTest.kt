@@ -51,7 +51,7 @@ class UntaggedPostLookupIntegrationTest {
                     limit = 100,
                 ),
             )
-        assertEquals(setOf(publicUntagged.slug, publicBlankCategories.slug), untagged.map { it.slug }.toSet())
+        assertEquals(setOf(publicUntagged.slug, publicBlankCategories.slug), untagged.posts.map { it.slug }.toSet())
 
         val untaggedOrKotlin =
             postReadService.feed(
@@ -62,7 +62,7 @@ class UntaggedPostLookupIntegrationTest {
             )
         assertEquals(
             setOf(publicUntagged.slug, publicBlankCategories.slug, publicKotlin.slug),
-            untaggedOrKotlin.map { it.slug }.toSet(),
+            untaggedOrKotlin.posts.map { it.slug }.toSet(),
         )
 
         val kotlinOnly =
@@ -72,14 +72,14 @@ class UntaggedPostLookupIntegrationTest {
                     limit = 100,
                 ),
             )
-        assertEquals(listOf(publicKotlin.slug), kotlinOnly.map { it.slug })
+        assertEquals(listOf(publicKotlin.slug), kotlinOnly.posts.map { it.slug })
 
         val allPublic =
             postReadService.feed(
                 PostFeedQuery(limit = 100),
             )
-        assertTrue(allPublic.map { it.slug }.containsAll(listOf(publicUntagged.slug, publicKotlin.slug, publicJava.slug)))
-        assertFalse(allPublic.map { it.slug }.contains(prefix + "-private"))
+        assertTrue(allPublic.posts.map { it.slug }.containsAll(listOf(publicUntagged.slug, publicKotlin.slug, publicJava.slug)))
+        assertFalse(allPublic.posts.map { it.slug }.contains(prefix + "-private"))
 
         val tags = postReadService.tags(limitArg = 100, offsetArg = 0)
         assertFalse(tags.tags.any { it.tag == PostTagFilter.UNTAGGED })

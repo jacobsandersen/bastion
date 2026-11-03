@@ -30,6 +30,7 @@ class PublicTagController(
                     limit = page.limit,
                     offset = page.offset,
                     count = tags.size,
+                    total = page.total,
                     hasMore = (page.offset + tags.size) < page.total,
                 ),
         )
