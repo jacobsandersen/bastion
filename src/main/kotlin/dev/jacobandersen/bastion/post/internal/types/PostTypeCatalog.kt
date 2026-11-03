@@ -53,11 +53,6 @@ class PostTypeCatalog(
             loadBundledDefault(resourceLoader)
         }
 
-    val roots: Set<String> =
-        effectiveConfig.roots
-            .map { normalizeRoot(it, "bastion.post-types.roots") }
-            .toSet()
-
     val defaultSyndicationFormat: SyndicationFormat =
         SyndicationFormat.parse(
             effectiveConfig.defaults.syndication.format,
@@ -100,9 +95,9 @@ class PostTypeCatalog(
 
     private val typesById: Map<String, PostType> = types.associateBy { it.id }
 
-    val fallback: String? = effectiveConfig.fallback?.let(::normalizeTypeId)
+    private val compiledRoots: Map<String, CompiledRoot> = compileRoots()
 
-    private val rules: List<CompiledRule> = compileRules()
+    val roots: Set<String> = compiledRoots.keys
 
     val fingerprint: String = computeFingerprint()
 
@@ -110,25 +105,28 @@ class PostTypeCatalog(
         require(roots.isNotEmpty()) { "bastion.post-types.roots must not be empty" }
         require(types.isNotEmpty()) { "bastion.post-types.types must not be empty" }
         require(types.map { it.id }.distinct().size == types.size) { "duplicate post type ids in configuration" }
-        require(fallback == null || fallback in typesById) {
-            "bastion.post-types.fallback targets unknown post type '$fallback'"
-        }
 
         logger.info {
-            "Loaded ${types.size} post types and ${rules.size} discovery rules " +
-                "(fallback=${fallback ?: "none"}, fingerprint=$fingerprint)"
+            "Loaded ${types.size} post types across roots ${roots.sorted()} with " +
+                "${compiledRoots.values.sumOf { it.rules.size }} discovery rules (fingerprint=$fingerprint)"
         }
-        if (rules.isEmpty()) {
-            logger.warn { "No post type discovery rules configured; all eligible posts use fallback '${fallback ?: "none"}'" }
+        compiledRoots.forEach { (root, compiled) ->
+            if (compiled.rules.isEmpty()) {
+                logger.warn { "Root '$root' has no discovery rules; posts use fallback '${compiled.fallback ?: "none"}'" }
+            }
         }
     }
 
+    /**
+     * Discovers the post type of [post] using the rules of its primary root
+     * (the first `type` entry, matching the stored `h` column). Returns null
+     * when the post has no configured root.
+     */
     fun discover(post: Mf2Object): PostTypeDiscovery? {
-        val postRoots = post.type.map { normalizeRoot(it, "post type") }
-        if (postRoots.none { it in roots }) return null
+        val root = compiledRoots[normalizeRoot(post.primaryType(), "post type")] ?: return null
 
-        rules.firstOrNull { it.condition.matches(post) }?.let { return PostTypeDiscovery(it.type, it.id) }
-        return PostTypeDiscovery(fallback, null)
+        root.rules.firstOrNull { it.condition.matches(post) }?.let { return PostTypeDiscovery(it.type, it.id) }
+        return PostTypeDiscovery(root.fallback, null)
     }
 
     fun isKnownType(raw: String): Boolean = raw.trim().lowercase(Locale.ROOT) in typesById
@@ -145,21 +143,42 @@ class PostTypeCatalog(
         return (commonProperties + definition.properties + definition.requiredProperties).distinct()
     }
 
-    private fun compileRules(): List<CompiledRule> {
-        val ruleIds = mutableSetOf<String>()
-        return effectiveConfig.discovery.map { rule ->
-            val id = rule.id.trim()
-            require(id.isNotEmpty()) { "discovery rule id must not be blank" }
-            require(ruleIds.add(id)) { "duplicate discovery rule id '$id'" }
+    private fun compileRoots(): Map<String, CompiledRoot> {
+        val compiled = linkedMapOf<String, CompiledRoot>()
+        effectiveConfig.roots.forEach { (rawRoot, rootConfig) ->
+            val root = normalizeRoot(rawRoot, "bastion.post-types.roots key")
+            require(root !in compiled) { "duplicate post type root '$root'" }
 
-            val typeId = normalizeTypeId(rule.type)
-            val definition =
-                typesById[typeId] ?: throw IllegalArgumentException(
-                    "discovery rule '$id' targets unknown post type '$typeId'",
-                )
-            val advertised = advertisedPropertiesFor(typeId).toSet()
-            CompiledRule(id, typeId, compileCondition(rule.match, id, advertised))
+            val fallback = rootConfig.fallback?.let(::normalizeTypeId)
+            if (fallback != null) {
+                val definition =
+                    typesById[fallback]
+                        ?: throw IllegalArgumentException("root '$root' fallback targets unknown post type '$fallback'")
+                require(definition.h == root) {
+                    "root '$root' fallback '$fallback' belongs to root '${definition.h}'"
+                }
+            }
+
+            val ruleIds = mutableSetOf<String>()
+            val rules =
+                rootConfig.rules.map { rule ->
+                    val id = rule.id.trim()
+                    require(id.isNotEmpty()) { "root '$root': discovery rule id must not be blank" }
+                    require(ruleIds.add(id)) { "root '$root': duplicate discovery rule id '$id'" }
+
+                    val typeId = normalizeTypeId(rule.type)
+                    val definition =
+                        typesById[typeId]
+                            ?: throw IllegalArgumentException("discovery rule '$id' targets unknown post type '$typeId'")
+                    require(definition.h == root) {
+                        "discovery rule '$id' in root '$root' targets post type '$typeId' which belongs to root '${definition.h}'"
+                    }
+                    val advertised = advertisedPropertiesFor(typeId).toSet()
+                    CompiledRule(id, typeId, compileCondition(rule.match, id, advertised))
+                }
+            compiled[root] = CompiledRoot(fallback, rules)
         }
+        return compiled
     }
 
     private fun compileCondition(
@@ -169,7 +188,6 @@ class PostTypeCatalog(
     ): CompiledCondition {
         val forms =
             listOfNotNull(
-                condition.h?.let { "h" },
                 condition.property?.let { "property" },
                 condition.all?.let { "all" },
                 condition.any?.let { "any" },
@@ -178,7 +196,7 @@ class PostTypeCatalog(
             )
         require(forms.size == 1) {
             "discovery rule '$ruleId': condition must define exactly one of " +
-                "h, property, all, any, not, name-prefix-of"
+                "property, all, any, not, name-prefix-of"
         }
 
         val form = forms.single()
@@ -189,12 +207,6 @@ class PostTypeCatalog(
         }
 
         return when (form) {
-            "h" -> {
-                val h = normalizeRoot(condition.h!!, "discovery rule '$ruleId' h")
-                require(h in roots) { "discovery rule '$ruleId' uses root '$h' which is not in roots" }
-                RootCondition(h)
-            }
-
             "property" -> {
                 val property = condition.property!!.trim()
                 require(property.isNotEmpty()) { "discovery rule '$ruleId': property must not be blank" }
@@ -270,16 +282,23 @@ class PostTypeCatalog(
     private fun computeFingerprint(): String {
         val canonical =
             buildString {
-                append("roots=").append(roots.sorted().joinToString(",")).append('\n')
-                append("fallback=").append(fallback ?: "").append('\n')
-                rules.forEach {
-                    append("rule=")
-                        .append(it.id)
+                compiledRoots.toSortedMap().forEach { (root, compiled) ->
+                    append("root=")
+                        .append(root)
                         .append('|')
-                        .append(it.type)
-                        .append('|')
-                        .append(it.condition.canonical())
+                        .append(compiled.fallback ?: "")
                         .append('\n')
+                    compiled.rules.forEach {
+                        append("rule=")
+                            .append(root)
+                            .append('|')
+                            .append(it.id)
+                            .append('|')
+                            .append(it.type)
+                            .append('|')
+                            .append(it.condition.canonical())
+                            .append('\n')
+                    }
                 }
             }
         return MessageDigest
@@ -300,6 +319,11 @@ class PostTypeCatalog(
             .orElseThrow { IllegalStateException("Could not bind bundled post type configuration") }
     }
 
+    private data class CompiledRoot(
+        val fallback: String?,
+        val rules: List<CompiledRule>,
+    )
+
     private data class CompiledRule(
         val id: String,
         val type: String,
@@ -310,14 +334,6 @@ class PostTypeCatalog(
         fun matches(post: Mf2Object): Boolean
 
         fun canonical(): String
-    }
-
-    private data class RootCondition(
-        val h: String,
-    ) : CompiledCondition {
-        override fun matches(post: Mf2Object): Boolean = post.type.any { normalizeRoot(it, "post type") == h }
-
-        override fun canonical(): String = "h:$h"
     }
 
     private data class PropertyCondition(

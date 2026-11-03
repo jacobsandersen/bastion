@@ -74,9 +74,12 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - Do not name the bundled file `post-types-default.yaml` while tests import `classpath:post-types.yaml`: Spring's
   config-data import also resolves the default-profile variant `post-types-default.yaml`, which shadows the external
   file. `post-types-bundled.yaml` avoids that collision.
-- Discovery evaluates a root gate (`roots`, otherwise no type), then the ordered `discovery` rules (first match wins),
-  then `fallback` (or null). The vocabulary is `h`, `property` with `text`/`url`/`one-of`/`object-has`,
-  `name-prefix-of`, and `all`/`any`/`not`. `url` requires an absolute http(s) URI.
+- Discovery is per root. `bastion.post-types.roots` is a map of mf2 root (`entry`, `event`, `h-` prefix optional) to
+  `{fallback, rules}`. A post uses the rules and fallback of its primary root (first `type` entry, same as the stored
+  `h` column); a root with no block gets no type. Rules are ordered, first match wins. A rule or fallback must target a
+  type whose `h` equals its root, or startup fails. The bundled default only defines `entry`. The vocabulary is
+  `property` with `text`/`url`/`one-of`/`object-has`, `name-prefix-of`, and `all`/`any`/`not`. `url` requires an
+  absolute http(s) URI.
 - Spring's binder silently ignores a property whose declared type is the enclosing type. `not` therefore binds to
   `PostTypesConfig.NegatedCondition`, which converts back to a `RuleCondition`; do not replace it with a direct
   self-reference.
@@ -84,7 +87,7 @@ When updating this file, preserve this bar for all agents and keep entries conci
   (`["yes", "no", ...]`).
 - `posts.type` is a normal indexed column now, not a generated expression. `PostService.create/updatePost` classify and
   write it; `PostTypeReclassificationService` backfills existing rows through `PostTypeBackfillWriter` (JDBC, batches,
-  no events, no syndication or webmention side effects). Its fingerprint covers roots/fallback/rules only, not
+  no events, no syndication or webmention side effects). Its fingerprint covers each root's fallback and rules (sorted by root) only, not
   syndication formats or type metadata. State lives in `post_type_state`; the fixed JobRunr job
   `post-type-reclassification` runs every 15 minutes and a claim row serializes replicas.
 - Keep `jsonb_element_text` in the database: `post_categories` (V11) still calls it even though the post type discovery

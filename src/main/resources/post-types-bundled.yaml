@@ -1,7 +1,5 @@
 bastion:
   post-types:
-    roots: [entry]
-    fallback: note
     common-properties:
       - published
       - updated
@@ -68,62 +66,65 @@ bastion:
         properties: [video]
         required-properties: [video, published]
 
-    discovery:
-      - id: rsvp
-        type: rsvp
-        match:
-          property: rsvp
-          value:
-            one-of: ["yes", "no", "maybe", "interested"]
-
-      - id: reply
-        type: reply
-        match:
-          property: in-reply-to
-          value:
-            url: true
-
-      - id: repost
-        type: repost
-        match:
-          property: repost-of
-          value:
-            url: true
-
-      - id: like
-        type: like
-        match:
-          property: like-of
-          value:
-            url: true
-
-      - id: video
-        type: video
-        match:
-          property: video
-          value:
-            url: true
-
-      - id: photo
-        type: photo
-        match:
-          property: photo
-          value:
-            url: true
-
-      - id: article
-        type: article
-        match:
-          all:
-            - property: name
+    roots:
+      entry:
+        fallback: note
+        rules:
+          - id: rsvp
+            type: rsvp
+            match:
+              property: rsvp
               value:
-                text: true
-            - any:
-                - property: content
+                one-of: ["yes", "no", "maybe", "interested"]
+
+          - id: reply
+            type: reply
+            match:
+              property: in-reply-to
+              value:
+                url: true
+
+          - id: repost
+            type: repost
+            match:
+              property: repost-of
+              value:
+                url: true
+
+          - id: like
+            type: like
+            match:
+              property: like-of
+              value:
+                url: true
+
+          - id: video
+            type: video
+            match:
+              property: video
+              value:
+                url: true
+
+          - id: photo
+            type: photo
+            match:
+              property: photo
+              value:
+                url: true
+
+          - id: article
+            type: article
+            match:
+              all:
+                - property: name
                   value:
                     text: true
-                - property: summary
-                  value:
-                    text: true
-            - not:
-                name-prefix-of: [content, summary]
+                - any:
+                    - property: content
+                      value:
+                        text: true
+                    - property: summary
+                      value:
+                        text: true
+                - not:
+                    name-prefix-of: [content, summary]

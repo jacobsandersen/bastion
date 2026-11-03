@@ -39,8 +39,7 @@ class PostReadServiceTest {
     private val registry =
         PostTypeCatalog(
             PostTypesConfig(
-                roots = listOf("entry"),
-                fallback = "note",
+                roots = mapOf("entry" to PostTypesConfig.Root(fallback = "note")),
                 defaults = PostTypesConfig.Defaults(SyndicationFormatConfig(format = "{excerpt}\n\n{url}")),
                 types =
                     listOf(
@@ -52,7 +51,7 @@ class PostReadServiceTest {
                     ),
             ),
             DefaultResourceLoader(),
-            MockEnvironment().withProperty("bastion.post-types.roots[0]", "entry"),
+            MockEnvironment().withProperty("bastion.post-types.roots.entry.fallback", "note"),
         )
     private val service =
         PostReadService(

@@ -30,7 +30,7 @@ class PostTypeCatalogTest {
         PostTypeCatalog(
             config,
             resourceLoader,
-            MockEnvironment().withProperty("bastion.post-types.roots[0]", "entry"),
+            MockEnvironment().withProperty("bastion.post-types.roots.entry.fallback", "note"),
         )
 
     private fun entry(properties: Map<String, List<Mf2Value>>): Mf2Object = Mf2Object(type = listOf("h-entry"), properties = properties)
@@ -164,13 +164,20 @@ class PostTypeCatalogTest {
             )
         val differentRule =
             base.copy(
-                discovery =
-                    listOf(
-                        PostTypesConfig.DiscoveryRule(
-                            id = "note",
-                            type = "note",
-                            match = PostTypesConfig.RuleCondition(property = "content"),
-                        ),
+                roots =
+                    mapOf(
+                        "entry" to
+                            PostTypesConfig.Root(
+                                fallback = "note",
+                                rules =
+                                    listOf(
+                                        PostTypesConfig.DiscoveryRule(
+                                            id = "note",
+                                            type = "note",
+                                            match = PostTypesConfig.RuleCondition(property = "content"),
+                                        ),
+                                    ),
+                            ),
                     ),
             )
 
@@ -180,7 +187,7 @@ class PostTypeCatalogTest {
 
     @Test
     fun `an incomplete external configuration fails instead of merging the default`() {
-        val environment = MockEnvironment().withProperty("bastion.post-types.roots[0]", "entry")
+        val environment = MockEnvironment().withProperty("bastion.post-types.roots.entry.fallback", "note")
 
         assertThrows<IllegalArgumentException> {
             PostTypeCatalog(PostTypesConfig(), resourceLoader, environment)
@@ -203,8 +210,19 @@ class PostTypeCatalogTest {
             """
             bastion:
               post-types:
-                roots: [entry]
-                fallback: note
+                roots:
+                  entry:
+                    fallback: note
+                    rules:
+                      - id: article
+                        type: article
+                        match:
+                          all:
+                            - property: name
+                              value:
+                                text: true
+                            - not:
+                                name-prefix-of: [content]
                 defaults:
                   syndication:
                     format: "{excerpt}\n\n{url}"
@@ -213,16 +231,6 @@ class PostTypeCatalogTest {
                     properties: [name, content]
                   - type: article
                     properties: [name, content]
-                discovery:
-                  - id: article
-                    type: article
-                    match:
-                      all:
-                        - property: name
-                          value:
-                            text: true
-                        - not:
-                            name-prefix-of: [content]
             """.trimIndent()
         val sources = MutablePropertySources()
         YamlPropertySourceLoader().load("test", ByteArrayResource(yaml.toByteArray())).forEach(sources::addLast)
@@ -244,8 +252,6 @@ class PostTypeCatalogTest {
 
     private fun customConfig(): PostTypesConfig =
         PostTypesConfig(
-            roots = listOf("entry"),
-            fallback = "note",
             defaults = PostTypesConfig.Defaults(SyndicationFormatConfig(format = "{excerpt}\n\n{url}")),
             types =
                 listOf(
@@ -270,35 +276,119 @@ class PostTypeCatalogTest {
                         properties = listOf("recipe-ingredient"),
                     ),
                 ),
-            discovery =
-                listOf(
-                    PostTypesConfig.DiscoveryRule(
-                        id = "recipe",
-                        type = "recipe",
-                        match =
-                            PostTypesConfig.RuleCondition(
-                                property = "recipe-ingredient",
-                                value = PostTypesConfig.ValueCondition(text = true),
+            roots = mapOf("entry" to PostTypesConfig.Root(fallback = "note", rules = customRules())),
+        )
+
+    private fun customRules(): List<PostTypesConfig.DiscoveryRule> =
+        listOf(
+            PostTypesConfig.DiscoveryRule(
+                id = "recipe",
+                type = "recipe",
+                match =
+                    PostTypesConfig.RuleCondition(
+                        property = "recipe-ingredient",
+                        value = PostTypesConfig.ValueCondition(text = true),
+                    ),
+            ),
+            PostTypesConfig.DiscoveryRule(
+                id = "article",
+                type = "article",
+                match =
+                    PostTypesConfig.RuleCondition(
+                        all =
+                            listOf(
+                                PostTypesConfig.RuleCondition(
+                                    property = "name",
+                                    value = PostTypesConfig.ValueCondition(text = true),
+                                ),
+                                PostTypesConfig.RuleCondition(
+                                    property = "content",
+                                    value = PostTypesConfig.ValueCondition(text = true),
+                                ),
                             ),
                     ),
-                    PostTypesConfig.DiscoveryRule(
-                        id = "article",
-                        type = "article",
-                        match =
-                            PostTypesConfig.RuleCondition(
-                                all =
+            ),
+        )
+
+    private fun multiRootConfig(
+        eventRuleType: String = "event",
+        eventFallback: String? = "event",
+    ): PostTypesConfig {
+        val base = customConfig()
+        return base.copy(
+            types =
+                base.types +
+                    listOf(
+                        PostTypesConfig.PostTypeDefinition(type = "event", name = "Event", h = "event", properties = listOf("content")),
+                        PostTypesConfig.PostTypeDefinition(
+                            type = "cancelled-event",
+                            name = "Cancelled event",
+                            h = "event",
+                            properties = listOf("content"),
+                        ),
+                    ),
+            roots =
+                base.roots +
+                    (
+                        "h-event" to
+                            PostTypesConfig.Root(
+                                fallback = eventFallback,
+                                rules =
                                     listOf(
-                                        PostTypesConfig.RuleCondition(
-                                            property = "name",
-                                            value = PostTypesConfig.ValueCondition(text = true),
-                                        ),
-                                        PostTypesConfig.RuleCondition(
-                                            property = "content",
-                                            value = PostTypesConfig.ValueCondition(text = true),
+                                        PostTypesConfig.DiscoveryRule(
+                                            id = "cancelled",
+                                            type = eventRuleType,
+                                            match =
+                                                PostTypesConfig.RuleCondition(
+                                                    property = "content",
+                                                    value = PostTypesConfig.ValueCondition(oneOf = listOf("cancelled")),
+                                                ),
                                         ),
                                     ),
-                            ),
+                            )
                     ),
-                ),
         )
+    }
+
+    private fun root(
+        root: String,
+        properties: Map<String, List<Mf2Value>>,
+    ) = Mf2Object(type = listOf(root), properties = properties)
+
+    @Test
+    fun `each root only applies its own rules and fallback`() {
+        val catalog = configured(multiRootConfig("cancelled-event"))
+
+        assertEquals(setOf("entry", "event"), catalog.roots)
+        assertEquals("cancelled-event", catalog.discover(root("h-event", mapOf("content" to strings("cancelled"))))?.type)
+        assertEquals("event", catalog.discover(root("h-event", mapOf("content" to strings("party"))))?.type)
+        // An h-event never reaches the h-entry rules, and an h-entry never reaches event rules.
+        assertEquals(
+            "event",
+            catalog.discover(root("h-event", mapOf("recipe-ingredient" to strings("flour"))))?.type,
+        )
+        assertEquals("note", discover(catalog, mapOf("content" to strings("cancelled"))))
+        assertNull(catalog.discover(root("h-card", mapOf("name" to strings("Sally")))))
+    }
+
+    @Test
+    fun `a rule targeting a type from another root fails startup`() {
+        assertThrows<IllegalArgumentException> { configured(multiRootConfig(eventRuleType = "note")) }
+        assertThrows<IllegalArgumentException> { configured(multiRootConfig(eventFallback = "note")) }
+    }
+
+    @Test
+    fun `fingerprint is stable under root ordering`() {
+        val config = multiRootConfig("cancelled-event")
+        val reordered =
+            config.copy(
+                roots =
+                    config.roots.entries
+                        .reversed()
+                        .associate { it.key to it.value },
+            )
+
+        assertEquals(configured(config).fingerprint, configured(reordered).fingerprint)
+        assertNotEquals(configured(config).fingerprint, configured(customConfig()).fingerprint)
+    }
 }

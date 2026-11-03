@@ -9,12 +9,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties
  */
 @ConfigurationProperties(prefix = "bastion.post-types")
 data class PostTypesConfig(
-    val roots: List<String> = emptyList(),
-    val fallback: String? = null,
+    val roots: Map<String, Root> = emptyMap(),
     val commonProperties: List<String> = emptyList(),
     val defaults: Defaults = Defaults(),
     val types: List<PostTypeDefinition> = emptyList(),
-    val discovery: List<DiscoveryRule> = emptyList(),
     val backfill: Backfill = Backfill(),
 ) {
     data class Defaults(
@@ -30,6 +28,12 @@ data class PostTypesConfig(
         val syndication: SyndicationFormatConfig? = null,
     )
 
+    /** Discovery configuration for one mf2 root (for example `entry` for h-entry). */
+    data class Root(
+        val fallback: String? = null,
+        val rules: List<DiscoveryRule> = emptyList(),
+    )
+
     data class DiscoveryRule(
         val id: String = "",
         val type: String = "",
@@ -37,7 +41,6 @@ data class PostTypesConfig(
     )
 
     data class RuleCondition(
-        val h: String? = null,
         val property: String? = null,
         val value: ValueCondition? = null,
         val all: List<RuleCondition>? = null,
@@ -53,14 +56,13 @@ data class PostTypesConfig(
      * silently ignored.
      */
     data class NegatedCondition(
-        val h: String? = null,
         val property: String? = null,
         val value: ValueCondition? = null,
         val all: List<RuleCondition>? = null,
         val any: List<RuleCondition>? = null,
         val namePrefixOf: List<String>? = null,
     ) {
-        fun asCondition(): RuleCondition = RuleCondition(h, property, value, all, any, null, namePrefixOf)
+        fun asCondition(): RuleCondition = RuleCondition(property, value, all, any, null, namePrefixOf)
     }
 
     data class ValueCondition(
