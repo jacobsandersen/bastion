@@ -73,7 +73,7 @@ logging:
 
 spring:
   config:
-    import: optional:file:/etc/config/micropub.yml,file:${BASTION_POST_TYPES_CONFIG_FILE:/etc/config/post-types.yaml},file:${BASTION_PROPERTIES_CONFIG_FILE:/etc/config/properties.yaml}
+    import: optional:file:/etc/config/micropub.yml,optional:file:${BASTION_POST_TYPES_CONFIG_FILE:/etc/config/post-types.yaml},file:${BASTION_PROPERTIES_CONFIG_FILE:/etc/config/properties.yaml}
   application:
     name: bastion
   jackson:

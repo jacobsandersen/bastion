@@ -2,6 +2,7 @@ package dev.jacobandersen.bastion.post.internal.syndication
 
 import com.sun.net.httpserver.HttpServer
 import dev.jacobandersen.bastion.post.internal.model.Post
+import dev.jacobandersen.bastion.post.internal.types.SyndicationFormat
 import dev.jacobandersen.bastion.post.types.PostStatus
 import dev.jacobandersen.bastion.post.types.PostVisibility
 import dev.jacobandersen.microformats2.Mf2Object
@@ -18,6 +19,17 @@ class SyndicationHttpClientTest {
     private val mapper: ObjectMapper = JsonMapper.builderWithJackson2Defaults().build()
 
     private val client = SyndicationHttpClient(mapper)
+
+    private val noteFormat =
+        SyndicationFormat.parse("{excerpt}\n\n{url}", null, "{url}", "test note")
+
+    private val articleFormat =
+        SyndicationFormat.parse(
+            "{name}: {excerpt}\n\n{url}",
+            "{excerpt}\n\n{url}",
+            "{name}\n\n{url}",
+            "test article",
+        )
 
     private fun target(port: Int): SyndicationConfig.Target =
         SyndicationConfig.Target(
@@ -130,6 +142,7 @@ class SyndicationHttpClientTest {
                 post(type = "article"),
                 "https://bastion.test/post/1",
                 300,
+                articleFormat,
             )
 
         val replace = mapper.readTree(update.replace!!)
@@ -146,6 +159,7 @@ class SyndicationHttpClientTest {
                 post(type = "note"),
                 "https://bastion.test/post/1",
                 300,
+                noteFormat,
             )
 
         val replace = mapper.readTree(update.replace!!)

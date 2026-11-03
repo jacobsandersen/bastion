@@ -1,10 +1,11 @@
 package dev.jacobandersen.bastion.post.read
 
-import dev.jacobandersen.bastion.post.internal.metadata.PostTypesConfig
-import dev.jacobandersen.bastion.post.internal.metadata.PostTypesRegistry
 import dev.jacobandersen.bastion.post.internal.repository.PostRepository
 import dev.jacobandersen.bastion.post.internal.store.PostService
 import dev.jacobandersen.bastion.post.internal.syndication.PostSyndicationService
+import dev.jacobandersen.bastion.post.internal.types.PostTypeCatalog
+import dev.jacobandersen.bastion.post.internal.types.PostTypesConfig
+import dev.jacobandersen.bastion.post.internal.types.SyndicationFormatConfig
 import dev.jacobandersen.bastion.post.types.PostMf2Type
 import dev.jacobandersen.bastion.post.types.PostTagFilter
 import dev.jacobandersen.bastion.url.ContentUrlConfig
@@ -19,6 +20,8 @@ import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.springframework.core.io.DefaultResourceLoader
+import org.springframework.mock.env.MockEnvironment
 import java.time.Instant
 import java.time.ZoneId
 
@@ -34,9 +37,12 @@ class PostReadServiceTest {
             ),
         )
     private val registry =
-        PostTypesRegistry(
+        PostTypeCatalog(
             PostTypesConfig(
-                postTypes =
+                roots = listOf("entry"),
+                fallback = "note",
+                defaults = PostTypesConfig.Defaults(SyndicationFormatConfig(format = "{excerpt}\n\n{url}")),
+                types =
                     listOf(
                         PostTypesConfig.PostTypeDefinition(type = "note"),
                         PostTypesConfig.PostTypeDefinition(type = "article"),
@@ -45,6 +51,8 @@ class PostReadServiceTest {
                         PostTypesConfig.PostTypeDefinition(type = "mood"),
                     ),
             ),
+            DefaultResourceLoader(),
+            MockEnvironment().withProperty("bastion.post-types.roots[0]", "entry"),
         )
     private val service =
         PostReadService(

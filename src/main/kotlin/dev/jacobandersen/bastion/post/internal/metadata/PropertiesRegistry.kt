@@ -1,18 +1,19 @@
 package dev.jacobandersen.bastion.post.internal.metadata
 
 import dev.jacobandersen.bastion.post.internal.config.PropertiesConfig
+import dev.jacobandersen.bastion.post.internal.types.PostTypeCatalog
 import dev.jacobandersen.bastion.post.metadata.PostPropertyView
 import org.springframework.stereotype.Service
 
 /**
  * Access point for the configured property metadata. Validates the config at
- * startup, including that every property referenced by the post-types config
+ * startup, including that every property referenced by the post type catalog
  * is defined here, and returns protocol-neutral views.
  */
 @Service
 class PropertiesRegistry(
     private val config: PropertiesConfig,
-    postTypesConfig: PostTypesConfig,
+    catalog: PostTypeCatalog,
 ) {
     private val byName: Map<String, PropertiesConfig.PropertyDefinition>
 
@@ -23,8 +24,7 @@ class PropertiesRegistry(
         require(names.distinct().size == names.size) { "duplicate property names in config" }
         byName = config.properties.associateBy { it.name }
 
-        val referenced = postTypesConfig.commonProperties + postTypesConfig.postTypes.flatMap { it.properties + it.requiredProperties }
-        val missing = referenced.distinct().filterNot { it in byName }
+        val missing = catalog.advertisedProperties().distinct().filterNot { it in byName }
         require(missing.isEmpty()) { "post-types reference undefined properties: $missing" }
     }
 

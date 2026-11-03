@@ -48,7 +48,7 @@ class PostEntityJsonRoundTripTest {
                 children = null,
             )
 
-        val saved = repository.saveAndFlush(PostEntity(slug, PostStatus.PUBLISHED, PostVisibility.PUBLIC, false, obj))
+        val saved = repository.saveAndFlush(PostEntity(slug, PostStatus.PUBLISHED, PostVisibility.PUBLIC, false, obj, type = "note"))
         val reloaded = repository.findById(saved.id!!).orElseThrow()
 
         assertEquals(slug, reloaded.slug)

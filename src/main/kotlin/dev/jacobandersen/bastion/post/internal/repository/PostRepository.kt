@@ -21,6 +21,13 @@ interface PostRepository :
 
     fun findBySlug(slug: String): PostEntity?
 
+    fun findAllByOrderByIdAsc(pageable: Pageable): List<PostEntity>
+
+    fun findByIdGreaterThanOrderByIdAsc(
+        id: UUID,
+        pageable: Pageable,
+    ): List<PostEntity>
+
     fun findByStatusAndVisibilityAndDeletedFalse(
         status: PostStatus,
         visibility: PostVisibility,

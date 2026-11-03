@@ -3,6 +3,7 @@ package dev.jacobandersen.bastion.post.internal.syndication
 import dev.jacobandersen.bastion.post.internal.entity.PostSyndicationEntity
 import dev.jacobandersen.bastion.post.internal.model.Post
 import dev.jacobandersen.bastion.post.internal.store.PostService
+import dev.jacobandersen.bastion.post.internal.types.PostTypeCatalog
 import dev.jacobandersen.bastion.post.internal.url.generatePostUrl
 import dev.jacobandersen.bastion.url.ContentUrlService
 import dev.jacobandersen.bastion.util.HttpUtil
@@ -30,6 +31,7 @@ class SyndicationService(
     private val httpClient: SyndicationHttpClient,
     private val postSyndicationService: PostSyndicationService,
     private val postService: PostService,
+    private val postTypeCatalog: PostTypeCatalog,
     private val urlService: ContentUrlService,
 ) {
     @Transactional
@@ -151,7 +153,13 @@ class SyndicationService(
         claimToken: UUID,
     ) {
         val canonicalUrl = urlService.generatePostUrl(post)
-        val update = httpClient.serializeExcerptUpdate(post, canonicalUrl, config.effectiveMaxGraphemes(target))
+        val update =
+            httpClient.serializeExcerptUpdate(
+                post,
+                canonicalUrl,
+                config.effectiveMaxGraphemes(target),
+                postTypeCatalog.syndicationFormatFor(post.type),
+            )
         jobScheduler.enqueue<SyndicationService>(claimToken) {
             it.runUpdateJob(post.id, target.uid, update, claimToken)
         }
@@ -379,7 +387,12 @@ class SyndicationService(
         post: Post,
         target: SyndicationConfig.Target,
         canonicalUrl: String,
-    ) = SyndicationContentMapper.build(post, canonicalUrl, config.effectiveMaxGraphemes(target))
+    ) = SyndicationContentMapper.build(
+        post,
+        canonicalUrl,
+        config.effectiveMaxGraphemes(target),
+        postTypeCatalog.syndicationFormatFor(post.type),
+    )
 
     companion object {
         private val CLAIM_LEASE: Duration = Duration.ofMinutes(5)

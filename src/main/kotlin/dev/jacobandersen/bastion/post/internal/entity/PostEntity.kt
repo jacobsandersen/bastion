@@ -41,6 +41,8 @@ class PostEntity(
     @Column(nullable = false)
     @JdbcTypeCode(SqlTypes.JSON)
     var post: Mf2Object,
+    @Column(name = "type", nullable = true)
+    var type: String? = null,
     @Version
     @Column(nullable = false)
     var version: Long? = null,
@@ -48,10 +50,6 @@ class PostEntity(
     @Generated(event = [EventType.INSERT])
     @Column(name = "h", nullable = false, insertable = false, updatable = false)
     var h: String? = null
-
-    @Generated(event = [EventType.INSERT])
-    @Column(name = "type", nullable = true, insertable = false, updatable = false)
-    var type: String? = null
 
     @Generated(event = [EventType.INSERT])
     @Column(name = "categories", insertable = false, updatable = false)
@@ -72,6 +70,7 @@ class PostEntity(
         visibility: PostVisibility,
         deleted: Boolean = false,
         post: Mf2Object,
+        type: String? = null,
     ) : this(
         null,
         slug,
@@ -79,6 +78,7 @@ class PostEntity(
         visibility,
         deleted,
         post,
+        type,
     )
 
     /**

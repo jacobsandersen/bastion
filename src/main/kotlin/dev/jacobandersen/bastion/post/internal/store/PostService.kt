@@ -5,6 +5,7 @@ import dev.jacobandersen.bastion.post.events.PostChangedEvent
 import dev.jacobandersen.bastion.post.internal.entity.PostEntity
 import dev.jacobandersen.bastion.post.internal.model.Post
 import dev.jacobandersen.bastion.post.internal.repository.PostRepository
+import dev.jacobandersen.bastion.post.internal.types.PostTypeCatalog
 import dev.jacobandersen.bastion.post.types.PostMf2Type
 import dev.jacobandersen.bastion.post.types.PostStatus
 import dev.jacobandersen.bastion.post.types.PostTagFilter
@@ -28,6 +29,7 @@ class PostService(
     private val postTimeService: PostTimeService,
     private val eventPublisher: ApplicationEventPublisher,
     private val entityManager: EntityManager,
+    private val postTypeCatalog: PostTypeCatalog,
 ) {
     companion object {
         const val MAX_PAGE_SIZE = 100
@@ -42,7 +44,8 @@ class PostService(
         post: Mf2Object,
     ): Post {
         val stamped = postTimeService.applyCreateTimestamps(post)
-        val saved = repository.saveAndFlush(PostEntity(slug, status, visibility, deleted, stamped)).toDomain()
+        val type = postTypeCatalog.discover(stamped)?.type
+        val saved = repository.saveAndFlush(PostEntity(slug, status, visibility, deleted, stamped, type)).toDomain()
         eventPublisher.publishEvent(
             PostChangedEvent(
                 postId = saved.id,
@@ -97,6 +100,7 @@ class PostService(
         entity.visibility = post.visibility
         entity.deleted = post.deleted
         entity.post = stamped
+        entity.type = postTypeCatalog.discover(stamped)?.type
 
         repository.saveAndFlush(entity)
         entityManager.refresh(entity)

@@ -1,10 +1,10 @@
 package dev.jacobandersen.bastion.post.read
 
-import dev.jacobandersen.bastion.post.internal.metadata.PostTypesRegistry
 import dev.jacobandersen.bastion.post.internal.model.Post
 import dev.jacobandersen.bastion.post.internal.repository.PostRepository
 import dev.jacobandersen.bastion.post.internal.store.PostService
 import dev.jacobandersen.bastion.post.internal.syndication.PostSyndicationService
+import dev.jacobandersen.bastion.post.internal.types.PostTypeCatalog
 import dev.jacobandersen.bastion.post.internal.url.generatePostUrl
 import dev.jacobandersen.bastion.post.types.PostMf2Type
 import dev.jacobandersen.bastion.post.types.PostTagFilter
@@ -31,7 +31,7 @@ class PostReadService(
     private val postService: PostService,
     private val postRepository: PostRepository,
     private val postSyndicationService: PostSyndicationService,
-    private val postTypesRegistry: PostTypesRegistry,
+    private val postTypeCatalog: PostTypeCatalog,
     private val urlService: ContentUrlService,
     private val zone: ZoneId,
 ) {
@@ -207,7 +207,7 @@ class PostReadService(
     private fun parsePostTypes(raw: List<String>?): List<String>? =
         parseCsv(raw)?.map { value ->
             val normalized = value.lowercase()
-            if (!postTypesRegistry.isKnownType(normalized)) {
+            if (!postTypeCatalog.isKnownType(normalized)) {
                 throw IllegalArgumentException("unknown post type: $value")
             }
             normalized
