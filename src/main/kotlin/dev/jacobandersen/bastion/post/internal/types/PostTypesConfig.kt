@@ -83,4 +83,13 @@ data class SyndicationFormatConfig(
     val format: String? = null,
     val fallbackFormat: String? = null,
     val overflowFormat: String? = null,
+    val excerpt: ExcerptSettings = ExcerptSettings(),
+)
+
+/** Raw `excerpt` settings; unset fields inherit from the defaults, then [ExcerptConfig.DEFAULT]. */
+data class ExcerptSettings(
+    val sources: List<String>? = null,
+    val ellipsis: String? = null,
+    val truncate: ExcerptTruncation? = null,
+    val minGraphemes: Int? = null,
 )

@@ -211,6 +211,12 @@ When updating this file, preserve this bar for all agents and keep entries conci
   required whenever the effective format contains `{name}` and must not itself use `{name}`. `maxGraphemes` counts
   grapheme clusters; the permalink is never dropped and `summary` is overwritten with the same text so full content
   cannot leak.
+- `{excerpt}` is configurable via `syndication.excerpt` (`sources`, `ellipsis`, `truncate`, `min-graphemes`), merged
+  field by field from defaults then the type (`ExcerptConfig.resolve`). Sources are mf2 properties tried in order
+  (HTML-only values are stripped with Jsoup); a source already shown by a template field is skipped. Besides
+  `{excerpt}`/`{url}`, placeholders are fields (`{name}`, `{summary}`, `{published}`, `{tags}`, `{prop:<property>}`)
+  that may be missing per post: any missing field switches to `fallback-format` (which may not use fields). Only the
+  excerpt is truncated; oversized field values push the post to `overflow-format`.
 - Updates use `SyndicationHttpClient.serializeExcerptUpdate`: a full `content`/`summary`/`url` (and article `name`)
   replace built from current post state, not the original Micropub delta. This keeps reconciliation idempotent.
 - `mp-syndicate-to` is translated by Micropub into a protocol-neutral `SyndicationTargetChange`
