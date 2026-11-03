@@ -97,7 +97,9 @@ class SyndicationHttpClient(
                 "summary" to listOf(rendered.text),
                 "url" to listOf(canonicalUrl),
             )
-        rendered.usedName?.let { replace["name"] = listOf(it) }
+        rendered.usedProperties
+            .filterKeys { it !in replace && it != "published" }
+            .forEach { (key, value) -> replace[key] = listOf(value) }
 
         return SyndicationUpdate(
             replace = objectMapper.writeValueAsString(replace),

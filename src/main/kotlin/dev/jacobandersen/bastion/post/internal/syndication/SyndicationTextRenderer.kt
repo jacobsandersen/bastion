@@ -1,20 +1,28 @@
 package dev.jacobandersen.bastion.post.internal.syndication
 
 import dev.jacobandersen.bastion.post.internal.model.Post
+import dev.jacobandersen.bastion.post.internal.types.ExcerptConfig
+import dev.jacobandersen.bastion.post.internal.types.ExcerptTruncation
 import dev.jacobandersen.bastion.post.internal.types.SyndicationFormat
 import dev.jacobandersen.bastion.post.internal.types.SyndicationTemplate
+import dev.jacobandersen.bastion.post.internal.types.TemplateField
+import dev.jacobandersen.microformats2.Mf2Object
+import dev.jacobandersen.microformats2.firstHtml
 import dev.jacobandersen.microformats2.firstText
-
-data class RenderedSyndicationText(
-    val text: String,
-    val usedName: String?,
-)
+import dev.jacobandersen.microformats2.texts
+import org.jsoup.Jsoup
+import org.jsoup.nodes.TextNode
 
 /**
- * Renders the downstream text for a post using its configured syndication
- * format. The permalink is never truncated; the excerpt is the only part that
- * is shortened to fit the target budget.
+ * The rendered downstream text plus the mf2 properties it displays, so an update can replace them with the same
+ * values the text was built from. Properties the renderer overwrites itself (content/summary/url) are not special
+ * cased here; callers decide how to merge.
  */
+data class RenderedSyndicationText(
+    val text: String,
+    val usedProperties: Map<String, String>,
+)
+
 object SyndicationTextRenderer {
     fun render(
         post: Post,
@@ -23,90 +31,139 @@ object SyndicationTextRenderer {
         format: SyndicationFormat,
     ): RenderedSyndicationText {
         val max = maxGraphemes.coerceAtLeast(1)
-        val name = normalizedOrNull(post.post.firstText("name"))
-        val content = normalizedOrNull(post.post.firstText("content"))
-        val template = chooseTemplate(format, name)
+        val fields = PostFields(post.post)
+        val excerpt = format.excerpt
+        val template = chooseTemplate(format, fields)
 
         val body =
-            when {
-                content != null -> content
-                name != null && !template.usesName -> name
-                else -> null
-            }
-        if (body == null) return overflow(format, name, canonicalUrl, max)
+            excerpt.sources
+                .asSequence()
+                .filter { it !in template.propertyKeys }
+                .firstNotNullOfOrNull(fields::text)
+        if (body == null) return overflow(format, fields, canonicalUrl, max)
 
-        val fixed = template.render(name, "", canonicalUrl)
+        val fixed = template.render("", canonicalUrl, fields::resolve)
         val allowance = max - Graphemes.count(fixed)
-        if (allowance < MIN_EXCERPT_GRAPHEMES) return overflow(format, name, canonicalUrl, max)
+        if (allowance < excerpt.minGraphemes.coerceAtLeast(1)) return overflow(format, fields, canonicalUrl, max)
 
         return RenderedSyndicationText(
-            text = template.render(name, truncate(body, allowance), canonicalUrl),
-            usedName = if (template.usesName) name else null,
+            text = template.render(truncate(body, allowance, excerpt), canonicalUrl, fields::resolve),
+            usedProperties = fields.used(template),
         )
     }
 
     private fun chooseTemplate(
         format: SyndicationFormat,
-        name: String?,
+        fields: PostFields,
     ): SyndicationTemplate =
-        if (format.format.usesName && name == null) {
-            requireNotNull(format.fallback) { "format uses {name} but has no fallback" }
+        if (format.format.fields.any { fields.resolve(it) == null }) {
+            requireNotNull(format.fallback) { "format uses optional placeholders but has no fallback" }
         } else {
             format.format
         }
 
     private fun overflow(
         format: SyndicationFormat,
-        name: String?,
+        fields: PostFields,
         canonicalUrl: String,
         maxGraphemes: Int,
     ): RenderedSyndicationText {
-        if (format.overflow.usesName && name == null) {
-            return RenderedSyndicationText(canonicalUrl, null)
+        val template = format.overflow
+        if (template.fields.any { fields.resolve(it) == null }) {
+            return RenderedSyndicationText(canonicalUrl, emptyMap())
         }
 
-        val overflowText = format.overflow.render(name, null, canonicalUrl)
+        val overflowText = template.render(null, canonicalUrl, fields::resolve)
         if (Graphemes.count(overflowText) <= maxGraphemes) {
-            return RenderedSyndicationText(overflowText, if (format.overflow.usesName) name else null)
+            return RenderedSyndicationText(overflowText, fields.used(template))
         }
 
-        if (name != null && format.overflow.usesName) {
-            val fixed = format.overflow.render("", null, canonicalUrl)
+        val name = fields.text("name")
+        if (name != null && template.usesName) {
+            val fixed =
+                template.render(null, canonicalUrl) { field ->
+                    if (field == NAME_FIELD) "" else fields.resolve(field)
+                }
             val allowance = maxGraphemes - Graphemes.count(fixed)
             if (allowance >= MIN_TITLE_GRAPHEMES) {
+                val truncated = truncate(name, allowance, format.excerpt)
                 return RenderedSyndicationText(
-                    text = format.overflow.render(truncate(name, allowance), null, canonicalUrl),
-                    usedName = name,
+                    text =
+                        template.render(null, canonicalUrl) { field ->
+                            if (field == NAME_FIELD) truncated else fields.resolve(field)
+                        },
+                    usedProperties = fields.used(template),
                 )
             }
         }
 
-        return RenderedSyndicationText(canonicalUrl, null)
+        return RenderedSyndicationText(canonicalUrl, emptyMap())
     }
-
-    private fun normalize(text: String): String = text.replace(Regex("\\s+"), " ").trim()
-
-    private fun normalizedOrNull(text: String?): String? = text?.let(::normalize)?.takeIf { it.isNotBlank() }
 
     private fun truncate(
         text: String,
         allowance: Int,
+        config: ExcerptConfig,
     ): String {
         if (allowance <= 0) return ""
         if (Graphemes.count(text) <= allowance) return text
-        val roomForText = (allowance - 1).coerceAtLeast(0)
+        val roomForText = (allowance - Graphemes.count(config.ellipsis)).coerceAtLeast(0)
         val cut = Graphemes.take(text, roomForText).trimEnd()
-        val lastSpace = cut.lastIndexOf(' ')
         val head =
-            if (lastSpace >= 0 && Graphemes.count(cut.substring(0, lastSpace)) >= MIN_WORD_KEEP_GRAPHEMES) {
-                cut.substring(0, lastSpace).trimEnd()
+            if (config.truncate == ExcerptTruncation.WORD) {
+                val lastSpace = cut.lastIndexOf(' ')
+                if (lastSpace >= 0 && Graphemes.count(cut.substring(0, lastSpace)) >= MIN_WORD_KEEP_GRAPHEMES) {
+                    cut.substring(0, lastSpace).trimEnd()
+                } else {
+                    cut
+                }
             } else {
                 cut
             }
-        return head + "…"
+        return head + config.ellipsis
     }
 
-    private const val MIN_EXCERPT_GRAPHEMES = 20
+    private val NAME_FIELD = TemplateField.Property("name")
     private const val MIN_TITLE_GRAPHEMES = 10
     private const val MIN_WORD_KEEP_GRAPHEMES = 20
+}
+
+/** Reads normalized plain-text values for template fields and excerpt sources from a post's mf2 object. */
+private class PostFields(
+    private val post: Mf2Object,
+) {
+    /** The first text value of [key], falling back to stripped HTML when only an html value is present. */
+    fun text(key: String): String? =
+        (post.firstText(key) ?: post.firstHtml(key)?.let(::htmlToText))?.let(::normalize)?.takeIf { it.isNotBlank() }
+
+    fun resolve(field: TemplateField): String? =
+        when (field) {
+            is TemplateField.Property -> text(field.key)
+            TemplateField.Tags -> tags()
+        }
+
+    /** Values of the properties [template] shows, keyed by mf2 property. */
+    fun used(template: SyndicationTemplate): Map<String, String> =
+        template.propertyKeys.mapNotNull { key -> text(key)?.let { key to it } }.toMap()
+
+    private fun tags(): String? =
+        post
+            .texts("category")
+            .map { "#" + it.trim().removePrefix("#").replace(WHITESPACE, "") }
+            .filter { it.length > 1 }
+            .distinct()
+            .joinToString(" ")
+            .takeIf { it.isNotEmpty() }
+
+    private fun htmlToText(html: String): String {
+        val document = Jsoup.parseBodyFragment(html)
+        document.select("br, p, div, li, blockquote, pre, h1, h2, h3, h4, h5, h6, tr").forEach { it.after(TextNode(" ")) }
+        return document.body().text()
+    }
+
+    private fun normalize(text: String): String = text.replace(WHITESPACE, " ").trim()
+
+    private companion object {
+        val WHITESPACE = Regex("\\s+")
+    }
 }

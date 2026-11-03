@@ -59,6 +59,7 @@ class PostTypeCatalog(
             effectiveConfig.defaults.syndication.fallbackFormat,
             effectiveConfig.defaults.syndication.overflowFormat,
             "defaults.syndication",
+            ExcerptConfig.resolve(effectiveConfig.defaults.syndication.excerpt, null, "defaults.syndication"),
         )
 
     val commonProperties: List<String> =
@@ -80,6 +81,11 @@ class PostTypeCatalog(
                         definition.syndication.fallbackFormat ?: effectiveConfig.defaults.syndication.fallbackFormat,
                         definition.syndication.overflowFormat ?: effectiveConfig.defaults.syndication.overflowFormat,
                         "post type '$id' syndication",
+                        ExcerptConfig.resolve(
+                            effectiveConfig.defaults.syndication.excerpt,
+                            definition.syndication.excerpt,
+                            "post type '$id' syndication",
+                        ),
                     )
                 }
 

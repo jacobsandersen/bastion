@@ -12,6 +12,14 @@ bastion:
       syndication:
         format: "{excerpt}\n\n{url}"
         overflow-format: "{url}"
+        # How {excerpt} is built. Every field is optional and can also be set per type under `syndication.excerpt`.
+        # excerpt:
+        #   sources: [content, name]  # mf2 properties tried in order; first non-blank text wins (HTML is stripped)
+        #   ellipsis: "…"             # appended when the excerpt is truncated
+        #   truncate: word            # word | grapheme
+        #   min-graphemes: 20         # less room than this for the excerpt -> overflow-format
+        # Format placeholders: {excerpt} {url} {name} {summary} {published} {tags} {prop:<mf2-property>}.
+        # A format using anything besides {excerpt}/{url} needs a fallback-format without those placeholders.
 
     types:
       - type: note
