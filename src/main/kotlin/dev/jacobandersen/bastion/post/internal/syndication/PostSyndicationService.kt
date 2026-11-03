@@ -162,9 +162,22 @@ class PostSyndicationService(
      * recorded, so readers do not depend on the writer's configuration.
      */
     @Transactional(readOnly = true)
-    fun findLinksByPostId(postId: UUID): List<PostSyndication> =
-        repository
-            .findByPostId(postId)
+    fun findLinksByPostId(postId: UUID): List<PostSyndication> = toLinks(repository.findByPostId(postId))
+
+    /** Batched [findLinksByPostId] for feeds: one query, posts without links are absent from the map. */
+    @Transactional(readOnly = true)
+    fun findLinksByPostIds(postIds: Collection<UUID>): Map<UUID, List<PostSyndication>> {
+        if (postIds.isEmpty()) return emptyMap()
+
+        return repository
+            .findByPostIdIn(postIds)
+            .groupBy { it.postId }
+            .mapValues { (_, entities) -> toLinks(entities) }
+            .filterValues { it.isNotEmpty() }
+    }
+
+    private fun toLinks(entities: List<PostSyndicationEntity>): List<PostSyndication> =
+        entities
             .mapNotNull { entity ->
                 entity.syndicatedUrl?.let { url ->
                     PostSyndication(

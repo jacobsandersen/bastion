@@ -14,12 +14,22 @@ class WebmentionReadService(
 
     fun countsForPost(postId: UUID): WebmentionCountsView = countsOf(receivedWebmentionService.verifiedByPost(postId))
 
-    fun countsByPostIds(postIds: Collection<UUID>): Map<UUID, WebmentionCountsView> {
+    fun countsByPostIds(postIds: Collection<UUID>): Map<UUID, WebmentionCountsView> = byPostIds(postIds).mapValues { it.value.counts }
+
+    /**
+     * Counts and verified webmentions (oldest first) for many posts from one query,
+     * for feeds. Every requested post has an entry, empty when it has no webmentions.
+     */
+    fun byPostIds(postIds: Collection<UUID>): Map<UUID, PostWebmentionsView> {
         if (postIds.isEmpty()) return emptyMap()
 
         val byPost = receivedWebmentionService.verifiedByPostIds(postIds).groupBy { it.postId }
         return postIds.associateWith { postId ->
-            countsOf(byPost[postId].orEmpty())
+            val mentions = byPost[postId].orEmpty()
+            PostWebmentionsView(
+                counts = countsOf(mentions),
+                webmentions = mentions.sortedBy { it.firstSeenAt }.map(::toView),
+            )
         }
     }
 
