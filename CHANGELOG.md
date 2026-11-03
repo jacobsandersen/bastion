@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.40](https://github.com/jacobsandersen/bastion/compare/v1.3.39...v1.3.40) (2026-11-03)
+
+
+### Bug Fixes
+
+* update pagination to include a total field ([#110](https://github.com/jacobsandersen/bastion/issues/110)) ([42e4b41](https://github.com/jacobsandersen/bastion/commit/42e4b41d4c1da47ae4d9aece0f34c27dfe2638a9))
+
 ## [1.3.39](https://github.com/jacobsandersen/bastion/compare/v1.3.38...v1.3.39) (2026-11-03)
 
 
