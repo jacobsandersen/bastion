@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.38](https://github.com/jacobsandersen/bastion/compare/v1.3.37...v1.3.38) (2026-11-03)
+
+
+### Features
+
+* improve syndication format feature, allowing for customization per post type ([#106](https://github.com/jacobsandersen/bastion/issues/106)) ([593ea38](https://github.com/jacobsandersen/bastion/commit/593ea38a541423f54d59628b73aa78877074f4fa))
+
 ## [1.3.37](https://github.com/jacobsandersen/bastion/compare/v1.3.36...v1.3.37) (2026-11-03)
 
 
