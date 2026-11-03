@@ -16,6 +16,11 @@ data class WebmentionView(
     val verifiedAt: Instant,
 )
 
+data class PostWebmentionsView(
+    val counts: WebmentionCountsView,
+    val webmentions: List<WebmentionView>,
+)
+
 data class WebmentionCountsView(
     val total: Int,
     val reply: Int,

@@ -13,6 +13,8 @@ import java.util.UUID
 interface PostSyndicationRepository : JpaRepository<PostSyndicationEntity, UUID> {
     fun findByPostId(postId: UUID): List<PostSyndicationEntity>
 
+    fun findByPostIdIn(postIds: Collection<UUID>): List<PostSyndicationEntity>
+
     fun findByPostIdAndTargetUid(
         postId: UUID,
         targetUid: String,

@@ -1,6 +1,7 @@
 package dev.jacobandersen.bastion.post.read
 
 import dev.jacobandersen.bastion.post.internal.model.Post
+import dev.jacobandersen.bastion.post.internal.model.PostSyndication
 import dev.jacobandersen.bastion.post.internal.repository.PostRepository
 import dev.jacobandersen.bastion.post.internal.store.PostService
 import dev.jacobandersen.bastion.post.internal.syndication.PostSyndicationService
@@ -103,10 +104,14 @@ class PostReadService(
         )
     }
 
-    fun syndicationLinks(postId: UUID): List<SyndicationLinkView> =
-        postSyndicationService.findLinksByPostId(postId).map { link ->
-            SyndicationLinkView(uid = link.targetUid, name = link.targetName, url = link.syndicatedUrl)
-        }
+    fun syndicationLinks(postId: UUID): List<SyndicationLinkView> = postSyndicationService.findLinksByPostId(postId).map(::toLinkView)
+
+    /** Batched [syndicationLinks] for feeds. Posts without links are absent from the map. */
+    fun syndicationLinksByPostIds(postIds: Collection<UUID>): Map<UUID, List<SyndicationLinkView>> =
+        postSyndicationService.findLinksByPostIds(postIds).mapValues { (_, links) -> links.map(::toLinkView) }
+
+    private fun toLinkView(link: PostSyndication): SyndicationLinkView =
+        SyndicationLinkView(uid = link.targetUid, name = link.targetName, url = link.syndicatedUrl)
 
     private fun toLookup(found: Post): PostLookup? =
         when {

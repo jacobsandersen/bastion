@@ -55,8 +55,19 @@ class PublicPostController(
                     day = day,
                 ),
             )
-        val webmentionCounts = webmentionReadService.countsByPostIds(posts.map { it.id })
-        val items = posts.map { post -> toResponse(post, webmentionCounts[post.id] ?: WebmentionCountsView.EMPTY, webmentions = null) }
+        val postIds = posts.map { it.id }
+        val webmentions = webmentionReadService.byPostIds(postIds)
+        val syndications = postReadService.syndicationLinksByPostIds(postIds)
+        val items =
+            posts.map { post ->
+                val postWebmentions = webmentions[post.id]
+                toResponse(
+                    post,
+                    postWebmentions?.counts ?: WebmentionCountsView.EMPTY,
+                    postWebmentions?.webmentions.orEmpty().map(WebmentionDto::from),
+                    syndications[post.id].orEmpty(),
+                )
+            }
         return FeedResponse(
             items = items,
             pagination =
