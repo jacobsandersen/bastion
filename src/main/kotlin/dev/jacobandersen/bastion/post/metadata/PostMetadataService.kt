@@ -1,8 +1,7 @@
 package dev.jacobandersen.bastion.post.metadata
 
-import dev.jacobandersen.bastion.post.internal.metadata.PostTypesConfig
-import dev.jacobandersen.bastion.post.internal.metadata.PostTypesRegistry
 import dev.jacobandersen.bastion.post.internal.metadata.PropertiesRegistry
+import dev.jacobandersen.bastion.post.internal.types.PostTypeCatalog
 import org.springframework.stereotype.Service
 
 /**
@@ -12,11 +11,19 @@ import org.springframework.stereotype.Service
  */
 @Service
 class PostMetadataService(
-    private val postTypesRegistry: PostTypesRegistry,
+    private val catalog: PostTypeCatalog,
     private val propertiesRegistry: PropertiesRegistry,
-    private val postTypesConfig: PostTypesConfig,
 ) {
-    fun postTypes(): List<PostTypeView> = postTypesRegistry.postTypes()
+    fun postTypes(): List<PostTypeView> =
+        catalog.types.map { type ->
+            PostTypeView(
+                type = type.id,
+                name = type.name,
+                h = type.h,
+                properties = catalog.commonProperties + type.properties,
+                requiredProperties = type.requiredProperties,
+            )
+        }
 
     fun allProperties(): List<PostPropertyView> = propertiesRegistry.allViews()
 
@@ -25,11 +32,8 @@ class PostMetadataService(
      * unknown.
      */
     fun propertiesFor(postType: String): List<PostPropertyView>? {
-        val value = postType.lowercase()
-        if (!postTypesRegistry.isKnownType(value)) return null
-
-        val definition = postTypesConfig.postTypes.first { it.type == value }
-        val names = postTypesConfig.commonProperties + definition.properties
+        val definition = catalog.definition(postType) ?: return null
+        val names = catalog.commonProperties + definition.properties
         return propertiesRegistry.viewsFor(names)
     }
 }

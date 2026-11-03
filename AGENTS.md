@@ -64,6 +64,35 @@ When updating this file, preserve this bar for all agents and keep entries conci
   understand 409. Keep the command methods transactional so the entity is loaded and flushed in one persistence
   context. Do not expose the version or ETag yet.
 
+## Post types and discovery
+
+- Post types and discovery rules are declarative in `post/internal/types`; adding or removing a type is a YAML change.
+  The bundled default is `src/main/resources/post-types-bundled.yaml` (strict IndieWeb h-entry PTD). An external
+  `bastion.post-types` configuration replaces it entirely; the catalog never merges the two. Detection uses the
+  presence of any enumerable `bastion.post-types.*` property, so a partial external file fails fast instead of
+  silently falling back.
+- Do not name the bundled file `post-types-default.yaml` while tests import `classpath:post-types.yaml`: Spring's
+  config-data import also resolves the default-profile variant `post-types-default.yaml`, which shadows the external
+  file. `post-types-bundled.yaml` avoids that collision.
+- Discovery is per root. `bastion.post-types.roots` is a map of mf2 root (`entry`, `event`, `h-` prefix optional) to
+  `{fallback, rules}`. A post uses the rules and fallback of its primary root (first `type` entry, same as the stored
+  `h` column); a root with no block gets no type. Rules are ordered, first match wins. A rule or fallback must target a
+  type whose `h` equals its root, or startup fails. The bundled default only defines `entry`. The vocabulary is
+  `property` with `text`/`url`/`one-of`/`object-has`, `name-prefix-of`, and `all`/`any`/`not`. `url` requires an
+  absolute http(s) URI.
+- Spring's binder silently ignores a property whose declared type is the enclosing type. `not` therefore binds to
+  `PostTypesConfig.NegatedCondition`, which converts back to a `RuleCondition`; do not replace it with a direct
+  self-reference.
+- YAML 1.1 parses unquoted `yes`/`no` as booleans. Quote RSVP values and any other literal in `one-of`/option lists
+  (`["yes", "no", ...]`).
+- `posts.type` is a normal indexed column now, not a generated expression. `PostService.create/updatePost` classify and
+  write it; `PostTypeReclassificationService` backfills existing rows through `PostTypeBackfillWriter` (JDBC, batches,
+  no events, no syndication or webmention side effects). Its fingerprint covers each root's fallback and rules (sorted by root) only, not
+  syndication formats or type metadata. State lives in `post_type_state`; the fixed JobRunr job
+  `post-type-reclassification` runs every 15 minutes and a claim row serializes replicas.
+- Keep `jsonb_element_text` in the database: `post_categories` (V11) still calls it even though the post type discovery
+  functions are gone. `V22` drops the other discovery helpers.
+
 ## Module events
 
 - `post` owns post-change events: `PostService` publishes `PostChangedEvent` (`post/events/`) from `create` and
@@ -176,9 +205,12 @@ When updating this file, preserve this bar for all agents and keep entries conci
   held-copy state; a row with `desired=false` and no held copy is removed on the next reconcile.
 - Dispatch jobs are best-effort `@Job(retries = 0)` and never fail the post command. The periodic reconciliation is the
   retry path. Non-public posts are never sent.
-- The downstream copy is an excerpt plus permalink (`SyndicationContentMapper.kt`): notes send `{excerpt}\n\n{url}`,
-  articles (`type == "article"`) send `{name}: {excerpt}\n\n{url}`. `maxGraphemes` counts grapheme clusters; the
-  permalink is never dropped and `summary` is overwritten with the same text so full content cannot leak.
+- The downstream copy is rendered from the post type's configured syndication template (`SyndicationTextRenderer.kt`
+  + `SyndicationContentMapper.kt`). `bastion.post-types.defaults.syndication` supplies the base format; a type's
+  `syndication` block overrides fields individually. `overflow-format` defaults to `{url}`, and `fallback-format` is
+  required whenever the effective format contains `{name}` and must not itself use `{name}`. `maxGraphemes` counts
+  grapheme clusters; the permalink is never dropped and `summary` is overwritten with the same text so full content
+  cannot leak.
 - Updates use `SyndicationHttpClient.serializeExcerptUpdate`: a full `content`/`summary`/`url` (and article `name`)
   replace built from current post state, not the original Micropub delta. This keeps reconciliation idempotent.
 - `mp-syndicate-to` is translated by Micropub into a protocol-neutral `SyndicationTargetChange`

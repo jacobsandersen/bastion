@@ -1,6 +1,7 @@
 package dev.jacobandersen.bastion.post.internal.syndication
 
 import dev.jacobandersen.bastion.post.internal.model.Post
+import dev.jacobandersen.bastion.post.internal.types.SyndicationFormat
 import dev.jacobandersen.bastion.post.types.PostStatus
 import dev.jacobandersen.bastion.post.types.PostVisibility
 import dev.jacobandersen.microformats2.Mf2Object
@@ -15,6 +16,22 @@ import java.util.UUID
 class SyndicationContentMapperTest {
     private val mapper = JsonMapper.builderWithJackson2Defaults().build()
     private val canonicalUrl = "https://bastion.test/2026/01/01/slug"
+
+    private val noteFormat =
+        SyndicationFormat.parse(
+            "{excerpt}\n\n{url}",
+            null,
+            "{url}",
+            "test note",
+        )
+
+    private val articleFormat =
+        SyndicationFormat.parse(
+            "{name}: {excerpt}\n\n{url}",
+            "{excerpt}\n\n{url}",
+            "{name}\n\n{url}",
+            "test article",
+        )
 
     private fun post(
         properties: Map<String, List<Mf2Value>>,
@@ -38,6 +55,7 @@ class SyndicationContentMapperTest {
                 post(mapOf("content" to listOf(Mf2Value.String("Hello world")))),
                 canonicalUrl,
                 300,
+                noteFormat,
             )
 
         assertEquals("Hello world\n\n$canonicalUrl", contentOf(mapped))
@@ -47,7 +65,13 @@ class SyndicationContentMapperTest {
     @Test
     fun `long note truncates at a word boundary within budget`() {
         val body = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor " + "word ".repeat(100)
-        val mapped = SyndicationContentMapper.build(post(mapOf("content" to listOf(Mf2Value.String(body)))), canonicalUrl, 300)
+        val mapped =
+            SyndicationContentMapper.build(
+                post(mapOf("content" to listOf(Mf2Value.String(body)))),
+                canonicalUrl,
+                300,
+                noteFormat,
+            )
         val content = contentOf(mapped)
 
         assertTrue(content.endsWith(canonicalUrl))
@@ -69,6 +93,7 @@ class SyndicationContentMapperTest {
                 ),
                 canonicalUrl,
                 300,
+                articleFormat,
             )
         val content = contentOf(mapped)
 
@@ -91,6 +116,7 @@ class SyndicationContentMapperTest {
                 ),
                 canonicalUrl,
                 120,
+                articleFormat,
             )
         val content = contentOf(mapped)
 
@@ -112,6 +138,7 @@ class SyndicationContentMapperTest {
                 ),
                 canonicalUrl,
                 60,
+                articleFormat,
             )
         val content = contentOf(mapped)
 
@@ -126,6 +153,7 @@ class SyndicationContentMapperTest {
                 post(mapOf("content" to listOf(Mf2Value.String("word ".repeat(50))))),
                 canonicalUrl,
                 10,
+                noteFormat,
             )
 
         assertEquals(canonicalUrl, contentOf(mapped))
@@ -143,6 +171,7 @@ class SyndicationContentMapperTest {
                 ),
                 canonicalUrl,
                 300,
+                noteFormat,
             )
 
         assertEquals(contentOf(mapped), mapped.firstText("summary"))
@@ -153,7 +182,12 @@ class SyndicationContentMapperTest {
     fun `html content collapses to plain text`() {
         val html = Mf2Value.Json(mapper.readTree("""{"html": "<p>Hello <strong>world</strong></p>", "value": "Hello world"}"""))
         val mapped =
-            SyndicationContentMapper.build(post(mapOf("content" to listOf(html))), canonicalUrl, 300)
+            SyndicationContentMapper.build(
+                post(mapOf("content" to listOf(html))),
+                canonicalUrl,
+                300,
+                noteFormat,
+            )
 
         assertEquals("Hello world\n\n$canonicalUrl", contentOf(mapped))
     }
@@ -162,7 +196,12 @@ class SyndicationContentMapperTest {
     fun `emoji survives truncation intact`() {
         val body = "word 🇺🇸 ".repeat(100)
         val mapped =
-            SyndicationContentMapper.build(post(mapOf("content" to listOf(Mf2Value.String(body)))), canonicalUrl, 100)
+            SyndicationContentMapper.build(
+                post(mapOf("content" to listOf(Mf2Value.String(body)))),
+                canonicalUrl,
+                100,
+                noteFormat,
+            )
         val content = contentOf(mapped)
 
         assertTrue(Graphemes.count(content) <= 100)
@@ -177,6 +216,7 @@ class SyndicationContentMapperTest {
                 post(mapOf("name" to listOf(Mf2Value.String("Just a title")))),
                 canonicalUrl,
                 300,
+                noteFormat,
             )
 
         assertEquals("Just a title\n\n$canonicalUrl", contentOf(mapped))

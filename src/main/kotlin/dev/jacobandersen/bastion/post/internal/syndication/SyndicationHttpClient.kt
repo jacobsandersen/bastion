@@ -1,9 +1,9 @@
 package dev.jacobandersen.bastion.post.internal.syndication
 
 import dev.jacobandersen.bastion.post.internal.model.Post
+import dev.jacobandersen.bastion.post.internal.types.SyndicationFormat
 import dev.jacobandersen.bastion.util.StringUtil.excerpt
 import dev.jacobandersen.microformats2.Mf2Object
-import dev.jacobandersen.microformats2.firstText
 import org.springframework.http.MediaType
 import org.springframework.http.client.ClientHttpRequestFactory
 import org.springframework.http.client.JdkClientHttpRequestFactory
@@ -88,20 +88,16 @@ class SyndicationHttpClient(
         post: Post,
         canonicalUrl: String,
         maxGraphemes: Int,
+        format: SyndicationFormat,
     ): SyndicationUpdate {
-        val excerpt = SyndicationContentMapper.excerptText(post, canonicalUrl, maxGraphemes)
+        val rendered = SyndicationTextRenderer.render(post, canonicalUrl, maxGraphemes, format)
         val replace =
             linkedMapOf<String, Any>(
-                "content" to listOf(excerpt),
-                "summary" to listOf(excerpt),
+                "content" to listOf(rendered.text),
+                "summary" to listOf(rendered.text),
                 "url" to listOf(canonicalUrl),
             )
-        if (SyndicationContentMapper.includesTitle(post)) {
-            post.post
-                .firstText("name")
-                ?.takeIf { it.isNotBlank() }
-                ?.let { replace["name"] = listOf(it) }
-        }
+        rendered.usedName?.let { replace["name"] = listOf(it) }
 
         return SyndicationUpdate(
             replace = objectMapper.writeValueAsString(replace),

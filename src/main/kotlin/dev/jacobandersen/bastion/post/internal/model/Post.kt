@@ -52,5 +52,14 @@ data class Post(
      * refetches them after flush. Updates go through the managed entity
      * instead of building a detached one.
      */
-    fun toEntity(): PostEntity = PostEntity(id = id, slug = slug, status = status, visibility = visibility, deleted = deleted, post = post)
+    fun toEntity(): PostEntity =
+        PostEntity(
+            id = id,
+            slug = slug,
+            status = status,
+            visibility = visibility,
+            deleted = deleted,
+            post = post,
+            type = type,
+        )
 }

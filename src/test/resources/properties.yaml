@@ -39,8 +39,8 @@ bastion:
         hints: [url]
       - name: rsvp
         display-name: RSVP
-        options: [yes, no, maybe, interested]
-        default: yes
+        options: ["yes", "no", "maybe", "interested"]
+        default: "yes"
       - name: photo
         display-name: Photo
         hints: [url]
