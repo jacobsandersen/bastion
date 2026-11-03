@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.39](https://github.com/jacobsandersen/bastion/compare/v1.3.38...v1.3.39) (2026-11-03)
+
+
+### Features
+
+* always include webmention and syndication data on feed requests ([#108](https://github.com/jacobsandersen/bastion/issues/108)) ([95b9f0b](https://github.com/jacobsandersen/bastion/commit/95b9f0be032bd9989b9c309c246a632371d46a68))
+
 ## [1.3.38](https://github.com/jacobsandersen/bastion/compare/v1.3.37...v1.3.38) (2026-11-03)
 
 
