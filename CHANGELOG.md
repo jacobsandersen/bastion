@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.37](https://github.com/jacobsandersen/bastion/compare/v1.3.36...v1.3.37) (2026-11-03)
+
+
+### Features
+
+* **post:** make post type discovery and syndication formats declarative ([#103](https://github.com/jacobsandersen/bastion/issues/103)) ([7810bc7](https://github.com/jacobsandersen/bastion/commit/7810bc797ec6b4cb20fe7e4128cf61aacc0acd1e))
+
+
+### Bug Fixes
+
+* **ci:** pass image inputs when triggering release builds ([#101](https://github.com/jacobsandersen/bastion/issues/101)) ([d68f480](https://github.com/jacobsandersen/bastion/commit/d68f480d9faa16e768c588a62cf726aa9757251e))
+
 ## [1.3.36](https://github.com/jacobsandersen/bastion/compare/v1.3.35...v1.3.36) (2026-10-29)
 
 
