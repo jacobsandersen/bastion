@@ -2,6 +2,7 @@ package dev.jacobandersen.bastion.api.internal
 
 import dev.jacobandersen.bastion.api.internal.post.PublicPostController
 import dev.jacobandersen.bastion.api.internal.post.dto.PostResponse
+import dev.jacobandersen.bastion.post.read.PostFeedPage
 import dev.jacobandersen.bastion.post.read.PostFeedQuery
 import dev.jacobandersen.bastion.post.read.PostLookup
 import dev.jacobandersen.bastion.post.read.PostReadService
@@ -98,7 +99,7 @@ class PublicPostControllerSyndicationsTest {
                 firstSeenAt = Instant.parse("2026-01-03T00:00:00Z"),
                 verifiedAt = Instant.parse("2026-01-03T00:00:00Z"),
             )
-        whenever(postReadService.feed(any<PostFeedQuery>())).thenReturn(listOf(post))
+        whenever(postReadService.feed(any<PostFeedQuery>())).thenReturn(PostFeedPage(listOf(post), 1))
         whenever(postReadService.syndicationLinksByPostIds(any()))
             .thenReturn(mapOf(postId to listOf(SyndicationLinkView("bridgy", "Bridgy", "https://brid.gy/copy/1"))))
         whenever(webmentionReadService.byPostIds(any()))
@@ -116,7 +117,7 @@ class PublicPostControllerSyndicationsTest {
     fun `feed returns empty lists rather than null for posts with no webmentions or syndications`() {
         val postReadService: PostReadService = mock()
         val webmentionReadService: WebmentionReadService = mock()
-        whenever(postReadService.feed(any<PostFeedQuery>())).thenReturn(listOf(post))
+        whenever(postReadService.feed(any<PostFeedQuery>())).thenReturn(PostFeedPage(listOf(post), 1))
         whenever(postReadService.syndicationLinksByPostIds(any())).thenReturn(emptyMap())
         whenever(webmentionReadService.byPostIds(any())).thenReturn(emptyMap())
         val controller = PublicPostController(postReadService, webmentionReadService)

@@ -36,7 +36,7 @@ class PostReadService(
     private val urlService: ContentUrlService,
     private val zone: ZoneId,
 ) {
-    fun feed(query: PostFeedQuery): List<PostView> {
+    fun feed(query: PostFeedQuery): PostFeedPage {
         validatePagination(query.limit, query.offset)
 
         val mf2Types = parseMf2Types(query.h)
@@ -59,7 +59,7 @@ class PostReadService(
                 )
             }
 
-        return posts.map(::toView)
+        return PostFeedPage(posts = posts.content.map(::toView), total = posts.totalElements)
     }
 
     /**

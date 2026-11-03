@@ -15,6 +15,7 @@ import dev.jacobandersen.microformats2.Mf2Object
 import jakarta.persistence.EntityManager
 import jakarta.persistence.criteria.Predicate
 import org.springframework.context.ApplicationEventPublisher
+import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.data.jpa.domain.Specification
@@ -154,7 +155,7 @@ class PostService(
         types: Collection<String>?,
         limit: Int,
         offset: Int,
-    ): List<Post> = findFeedPosts(mf2Types, types, limit, offset, null, null, null)
+    ): Page<Post> = findFeedPosts(mf2Types, types, limit, offset, null, null, null)
 
     @Transactional(readOnly = true)
     fun findFeedPosts(
@@ -164,7 +165,7 @@ class PostService(
         offset: Int,
         from: Instant?,
         toExclusive: Instant?,
-    ): List<Post> = findFeedPosts(mf2Types, types, limit, offset, from, toExclusive, null)
+    ): Page<Post> = findFeedPosts(mf2Types, types, limit, offset, from, toExclusive, null)
 
     @Transactional(readOnly = true)
     fun findFeedPosts(
@@ -175,7 +176,7 @@ class PostService(
         from: Instant?,
         toExclusive: Instant?,
         tagFilter: PostTagFilter?,
-    ): List<Post> {
+    ): Page<Post> {
         require(offset % limit == 0) { "offset must be a multiple of limit" }
         require((from == null) == (toExclusive == null)) { "both from and toExclusive must be provided together" }
 
@@ -191,7 +192,7 @@ class PostService(
                 toExclusive,
                 tagFilter,
             )
-        return repository.findAll(spec, pageRequest).content.map { it.toDomain() }
+        return repository.findAll(spec, pageRequest).map { it.toDomain() }
     }
 
     private fun buildFeedSpecification(

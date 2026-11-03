@@ -21,6 +21,7 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.core.io.DefaultResourceLoader
+import org.springframework.data.domain.PageImpl
 import org.springframework.mock.env.MockEnvironment
 import java.time.Instant
 import java.time.ZoneId
@@ -74,7 +75,7 @@ class PostReadServiceTest {
                 anyOrNull(),
                 anyOrNull(),
             ),
-        ).thenReturn(emptyList())
+        ).thenReturn(PageImpl(emptyList()))
     }
 
     private fun captureFeed(): Triple<
