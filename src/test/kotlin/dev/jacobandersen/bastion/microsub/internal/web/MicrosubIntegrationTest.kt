@@ -620,6 +620,31 @@ class MicrosubIntegrationTest {
         }
     }
 
+    @Test
+    fun `retries a first notification that arrives while the webmention is still being verified`() {
+        val webmentionId = UUID.randomUUID()
+        whenever(webmentions.receivedById(webmentionId)).thenReturn(ReceivedWebmentionLookup.Unsettled)
+        publish(webmentionId)
+
+        try {
+            await().atMost(Duration.ofSeconds(10)).untilAsserted {
+                assertEquals(1, failedPublications(webmentionId), "the publication stays for the resubmission job")
+            }
+        } finally {
+            jdbc
+                .sql("delete from event_publication where serialized_event like :id")
+                .param("id", "%$webmentionId%")
+                .update()
+        }
+    }
+
+    private fun failedPublications(webmentionId: UUID): Int =
+        jdbc
+            .sql("select count(*) from event_publication where status = 'FAILED' and serialized_event like :id")
+            .param("id", "%$webmentionId%")
+            .query(Int::class.java)
+            .single()
+
     private fun pendingPublications(webmentionId: UUID): Int =
         jdbc
             .sql("select count(*) from event_publication where serialized_event like :id")

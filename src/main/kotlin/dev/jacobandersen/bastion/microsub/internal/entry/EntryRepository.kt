@@ -215,6 +215,17 @@ class EntryRepository(
             .update()
     }
 
+    fun existsBySourceKey(
+        channelId: UUID,
+        sourceKey: String,
+    ): Boolean =
+        jdbc
+            .sql("select exists (select 1 from microsub_entries where channel_id = :channel and source_key = :key)")
+            .param("channel", channelId)
+            .param("key", sourceKey)
+            .query(Boolean::class.java)
+            .single()
+
     fun deleteBySourceKey(
         channelId: UUID,
         sourceKey: String,

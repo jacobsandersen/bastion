@@ -286,7 +286,7 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - Mutes hide entries at query time; blocks also delete stored entries and drop new ones at ingest. Received
   webmentions mirror into `notifications` through `ReceivedWebmentionChangedEvent`; the listener reloads state with
   `WebmentionReadService.receivedById` and deletes the entry once the webmention is gone (missing, rejected, deleted,
-  or a nested copy). A PENDING/ERROR re-verification keeps the entry, because settling with unchanged content
-  publishes no event.
+  or a nested copy). A PENDING/ERROR re-verification keeps an existing entry, because settling with unchanged content
+  publishes no event; with no entry yet the listener throws so the resubmission job retries after verification.
 - Jackson 3 `JsonNode.map {}` applies the lambda to the node itself and does not iterate. Use `.toList().map` (or
   `mapNotNull`/`take`, which are Kotlin iterable extensions) to iterate array elements.

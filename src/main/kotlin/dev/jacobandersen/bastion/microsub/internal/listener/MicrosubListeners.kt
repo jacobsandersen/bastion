@@ -41,7 +41,9 @@ class WebsubContentListener(
  * Mirrors directly received webmentions into the `notifications` channel.
  * Loads the latest state rather than trusting the event, so a webmention that
  * is gone is removed and replays converge. A webmention still being
- * re-verified keeps its entry; settling announces any display change.
+ * re-verified keeps its entry; settling announces any display change. With no
+ * entry yet, the event fails so the resubmission job retries it after
+ * verification settles, since settling unchanged publishes nothing.
  */
 @Component
 class WebmentionNotificationListener(
@@ -57,9 +59,18 @@ class WebmentionNotificationListener(
         val key = sourceKey(event.webmentionId)
         val item =
             when (val lookup = webmentions.receivedById(event.webmentionId)) {
-                is ReceivedWebmentionLookup.Displayed -> toItem(lookup.webmention)
-                ReceivedWebmentionLookup.Unsettled -> return
-                ReceivedWebmentionLookup.Gone -> null
+                is ReceivedWebmentionLookup.Displayed -> {
+                    toItem(lookup.webmention)
+                }
+
+                ReceivedWebmentionLookup.Unsettled -> {
+                    if (entries.existsBySourceKey(channel.id, key)) return
+                    throw IllegalStateException("Webmention ${event.webmentionId} is still being verified; retrying later")
+                }
+
+                ReceivedWebmentionLookup.Gone -> {
+                    null
+                }
             }
         if (item == null || (item.authorUrl != null && moderation.isBlocked(channel.id, item.authorUrl))) {
             entries.deleteBySourceKey(channel.id, key)
