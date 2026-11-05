@@ -13,6 +13,11 @@ data class WebmentionDto(
     val contentHtml: List<String>,
     val firstSeenAt: String,
     val verifiedAt: String,
+    val url: String?,
+    val urlSameOrigin: Boolean,
+    val inReplyTo: List<String>,
+    val parentSourceUrl: String?,
+    val viaSourceUrl: String?,
 ) {
     companion object {
         fun from(view: WebmentionView): WebmentionDto =
@@ -27,6 +32,11 @@ data class WebmentionDto(
                 contentHtml = view.contentHtml,
                 firstSeenAt = view.firstSeenAt.toString(),
                 verifiedAt = view.verifiedAt.toString(),
+                url = view.url,
+                urlSameOrigin = view.urlSameOrigin,
+                inReplyTo = view.inReplyTo,
+                parentSourceUrl = view.parentSourceUrl,
+                viaSourceUrl = view.viaSourceUrl,
             )
     }
 }

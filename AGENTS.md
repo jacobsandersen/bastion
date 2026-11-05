@@ -232,6 +232,24 @@ When updating this file, preserve this bar for all agents and keep entries conci
   cooldown. The pair bucket is consumed first so a rejected duplicate pair does not spend a source token. Redis errors
   propagate and fail the request closed rather than allowing unlimited submissions. Configure the connection with
   `BASTION_REDIS_*`; use a non-zero `BASTION_REDIS_DATABASE` when sharing Redis.
+- Salmention:
+  - Received responses are threaded when the API reads them (`WebmentionThreadResolver`), not stored as a parent
+    column, so out-of-order arrivals thread correctly. The parent is the response whose source URL or `u-url` is in
+    `in_reply_to`.
+  - Nested responses a verified source displays (`comment` values and nested h-entry/h-cite) are stored as their own
+    rows with `via_id`. A directly received webmention always wins and is never overwritten by a nested copy.
+  - A row's identity for dedup, takeover, and deletion is its source URL plus its `u-url` only when that shares the
+    source's origin (`ReceivedWebmentionAnalyzer.identityUrls`), so a webmention cannot suppress another site's
+    response. Tradeoff: a cross-origin proxy reply (Bridgy) that is also displayed nested can appear twice. Threading
+    also indexes cross-origin `u-url`s, but only as lowest-priority fallback keys, so Bridgy reply chains thread while a
+    spoofer can only capture URLs no other row claims. Own content URLs (`ContentUrlMatcher`) are never thread keys, so
+    no response can claim the post itself; moderation is the future remedy for bad actors. The API exposes
+    `urlSameOrigin` so the frontend can tell a verified `url` from a source's cross-origin claim.
+  - `display_fingerprint` survives `ensurePending`. Only a real change in what the post displays enqueues
+    `SalmentionService.resendAfterResponseChange`, which runs `reconcile(refresh = true)` to re-ping the post's
+    delivered targets upstream. This gate is what stops ping-pong loops.
+  - The frontend must render received replies as nested `p-comment h-cite` (with `u-url`/`u-in-reply-to`) inside the
+    post's `h-entry`, or upstream sites see nothing new.
 - Self-webmentions are suppressed: `ContentUrlMatcher.isOwnContentUrl` (host + port match on `bastion.content.base-url`,
   lenient on scheme) filters targets in `WebmentionService.targetUrlsOf` plus a guard in `sendWebmention`, and
   `WebmentionController` rejects sources on the own content domain.
