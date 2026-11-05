@@ -56,8 +56,32 @@ class WebsubHttpClient(
         val payload = LinkedMultiValueMap<String, String>()
         payload.add("hub.mode", "publish")
         payload.add("hub.url", topicUrl)
+        return postForm(hubUrl, payload)
+    }
 
-        return try {
+    /** Sends a subscribe or unsubscribe request; a 2xx only means the hub will verify intent. */
+    internal fun subscription(
+        hubUrl: String,
+        mode: String,
+        topicUrl: String,
+        callbackUrl: String,
+        secret: String?,
+        leaseSeconds: Long?,
+    ): PublishResult {
+        val payload = LinkedMultiValueMap<String, String>()
+        payload.add("hub.mode", mode)
+        payload.add("hub.topic", topicUrl)
+        payload.add("hub.callback", callbackUrl)
+        secret?.let { payload.add("hub.secret", it) }
+        leaseSeconds?.let { payload.add("hub.lease_seconds", it.toString()) }
+        return postForm(hubUrl, payload)
+    }
+
+    private fun postForm(
+        hubUrl: String,
+        payload: LinkedMultiValueMap<String, String>,
+    ): PublishResult =
+        try {
             val statusCode =
                 client
                     .post()
@@ -81,7 +105,6 @@ class WebsubHttpClient(
         } catch (e: RestClientException) {
             PublishResult.Failure(null, e.message ?: e::class.simpleName ?: "Request failed", true)
         }
-    }
 
     private fun describeHttpError(
         statusCode: Int,

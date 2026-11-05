@@ -23,12 +23,13 @@ import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.mockito.kotlin.any
+import org.springframework.context.ApplicationEventPublisher
 import java.time.Instant
 import java.util.UUID
 
 class ReceivedWebmentionServiceTest {
     private val repository = mock(ReceivedWebmentionRepository::class.java)
-    private val service = ReceivedWebmentionService(repository)
+    private val service = ReceivedWebmentionService(repository, mock(ApplicationEventPublisher::class.java))
 
     init {
         `when`(repository.save(any())).thenAnswer {

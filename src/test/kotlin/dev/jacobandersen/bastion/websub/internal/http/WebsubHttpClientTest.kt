@@ -42,6 +42,39 @@ class WebsubHttpClientTest {
     }
 
     @Test
+    fun `sends subscription requests with callback, secret and lease`() {
+        var body: String? = null
+        val server = HttpServer.create(InetSocketAddress(0), 0)
+        server.createContext("/") { exchange ->
+            body = String(exchange.requestBody.readAllBytes(), Charsets.UTF_8)
+            exchange.sendResponseHeaders(202, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val result =
+                client.subscription(
+                    hubUrl = "http://127.0.0.1:${server.address.port}/hub",
+                    mode = "subscribe",
+                    topicUrl = "https://feeds.example/feed",
+                    callbackUrl = "https://bastion.test/websub/callback/abc",
+                    secret = "s3cret",
+                    leaseSeconds = 3600,
+                )
+
+            assertInstanceOf(PublishResult.Success::class.java, result)
+            val params = parseForm(body!!)
+            assertEquals("subscribe", params["hub.mode"])
+            assertEquals("https://feeds.example/feed", params["hub.topic"])
+            assertEquals("https://bastion.test/websub/callback/abc", params["hub.callback"])
+            assertEquals("s3cret", params["hub.secret"])
+            assertEquals("3600", params["hub.lease_seconds"])
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun `flags transient statuses as retryable failures`() {
         val server = HttpServer.create(InetSocketAddress(0), 0)
         server.createContext("/") { exchange ->

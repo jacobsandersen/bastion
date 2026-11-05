@@ -68,6 +68,7 @@ dependencies {
     implementation("software.amazon.awssdk:s3:2.10.53")
     implementation("org.nibor.autolink:autolink:0.12.0")
     implementation("org.jsoup:jsoup:1.23.2")
+    implementation("com.rometools:rome:2.1.0")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.mockito.kotlin:mockito-kotlin:6.2.0")
     testImplementation("org.awaitility:awaitility")

@@ -2,6 +2,7 @@ package dev.jacobandersen.bastion.webmention.read
 
 import dev.jacobandersen.bastion.url.ContentUrlMatcher
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmention
+import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionState
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.service.ReceivedWebmentionService
 import dev.jacobandersen.bastion.webmention.internal.service.ReceivedWebmentionAnalyzer
@@ -17,6 +18,19 @@ class WebmentionReadService(
 ) {
     /** Verified webmentions for a post, oldest first, each with its place in the reply thread. */
     fun verifiedByPost(postId: UUID): List<WebmentionView> = resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
+
+    /**
+     * A directly received webmention by id, threaded within its post, or null
+     * when it does not exist, is not (or no longer) verified, or is a nested
+     * Salmention copy.
+     */
+    fun receivedById(id: UUID): WebmentionView? {
+        val mention = receivedWebmentionService.find(id) ?: return null
+        if (mention.viaId != null || mention.state != ReceivedWebmentionState.VERIFIED) return null
+        return resolve(receivedWebmentionService.verifiedByPost(mention.postId))
+            .firstOrNull { it.mention.id == id }
+            ?.let(::toView)
+    }
 
     fun countsForPost(postId: UUID): WebmentionCountsView = countsOf(resolve(receivedWebmentionService.verifiedByPost(postId)))
 
