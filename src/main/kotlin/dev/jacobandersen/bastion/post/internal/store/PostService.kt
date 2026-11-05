@@ -54,6 +54,7 @@ class PostService(
                 wasFeedVisible = false,
                 isFeedVisible = saved.isFeedVisible,
                 occurredAt = Instant.now(),
+                facets = saved.feedFacets,
             ),
         )
         return saved
@@ -119,6 +120,8 @@ class PostService(
                 wasFeedVisible = previous.isFeedVisible,
                 isFeedVisible = saved.isFeedVisible,
                 occurredAt = Instant.now(),
+                previousFacets = previous.feedFacets,
+                facets = saved.feedFacets,
             ),
         )
         return saved

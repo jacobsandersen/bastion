@@ -128,4 +128,24 @@ class PostChangedEventTest {
         val event = lastEvent()
         assertFalse(event.isFeedVisible)
     }
+
+    @Test
+    fun `events carry the feed facets before and after an update`() {
+        val tagged =
+            postService.create(
+                uniqueSlug("facets"),
+                PostStatus.PUBLISHED,
+                PostVisibility.PUBLIC,
+                false,
+                post().setProperty("category", Mf2Value.String("old")),
+            )
+        assertEquals(listOf("old"), lastEvent().facets?.tags)
+        events.clear()
+
+        postService.updatePost(tagged, tagged.post.setProperty("category", Mf2Value.String("new")))
+
+        val event = lastEvent()
+        assertEquals(listOf("old"), event.previousFacets?.tags)
+        assertEquals(listOf("new"), event.facets?.tags)
+    }
 }

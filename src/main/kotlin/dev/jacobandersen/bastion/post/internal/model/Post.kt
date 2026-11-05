@@ -1,11 +1,14 @@
 package dev.jacobandersen.bastion.post.internal.model
 
+import dev.jacobandersen.bastion.post.events.PostFeedFacets
 import dev.jacobandersen.bastion.post.internal.entity.PostEntity
 import dev.jacobandersen.bastion.post.types.PostStatus
 import dev.jacobandersen.bastion.post.types.PostVisibility
 import dev.jacobandersen.microformats2.Mf2Object
 import dev.jacobandersen.microformats2.Mf2Value
+import dev.jacobandersen.microformats2.texts
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 data class Post(
@@ -43,6 +46,20 @@ data class Post(
      */
     val isFeedVisible: Boolean
         get() = !deleted && status == PostStatus.PUBLISHED && visibility == PostVisibility.PUBLIC
+
+    /** What decides which feeds this post appears in; see [PostFeedFacets]. */
+    val feedFacets: PostFeedFacets
+        get() =
+            PostFeedFacets(
+                type = type,
+                tags =
+                    post
+                        .texts("category")
+                        .map(String::trim)
+                        .filter(String::isNotEmpty)
+                        .distinct(),
+                publishedYear = publishedAt?.withOffsetSameInstant(ZoneOffset.UTC)?.year,
+            )
 
     /**
      * Map this domain Post to a PostEntity for persisting a new post.

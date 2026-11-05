@@ -53,7 +53,13 @@ bastion:
     read-timeout-seconds: ${BASTION_WEBMENTION_READ_TIMEOUT_SECONDS:10}
   websub:
     hubs: ${BASTION_WEBSUB_HUBS:}
-    topic-url: ${BASTION_WEBSUB_TOPIC_URL:}
+    topics:
+      main: ${BASTION_WEBSUB_TOPICS_MAIN:}
+      uncategorized: ${BASTION_WEBSUB_TOPICS_UNCATEGORIZED:}
+      type: ${BASTION_WEBSUB_TOPICS_TYPE:}
+      type-names: ${BASTION_WEBSUB_TOPICS_TYPE_NAMES:}
+      tag: ${BASTION_WEBSUB_TOPICS_TAG:}
+      year: ${BASTION_WEBSUB_TOPICS_YEAR:}
     connect-timeout-seconds: ${BASTION_WEBSUB_CONNECT_TIMEOUT_SECONDS:10}
     read-timeout-seconds: ${BASTION_WEBSUB_READ_TIMEOUT_SECONDS:10}
     subscriber:
