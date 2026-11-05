@@ -264,7 +264,7 @@ class ReceivedWebmentionService(
         if (orphans.isNotEmpty()) repository.deleteAll(orphans)
     }
 
-    /** The rows among [rows] that are the response at [url], by source URL or canonical URL. */
+    /** The rows among [rows] that are the response at [url], by their identity URLs. */
     private fun matching(
         rows: List<ReceivedWebmentionEntity>,
         url: String,
@@ -274,7 +274,7 @@ class ReceivedWebmentionService(
     }
 
     private fun keysOf(row: ReceivedWebmentionEntity): Set<String> =
-        listOfNotNull(row.sourceUrl, row.url).map(ReceivedWebmentionAnalyzer::urlKey).toSet()
+        ReceivedWebmentionAnalyzer.identityUrls(row.sourceUrl, row.url).map(ReceivedWebmentionAnalyzer::urlKey).toSet()
 
     private fun applyAnalysis(
         entity: ReceivedWebmentionEntity,

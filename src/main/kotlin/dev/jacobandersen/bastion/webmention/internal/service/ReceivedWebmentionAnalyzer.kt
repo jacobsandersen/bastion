@@ -16,6 +16,7 @@ import dev.jacobandersen.microformats2.firstText
 import dev.jacobandersen.microformats2.htmls
 import dev.jacobandersen.microformats2.plainTextOrNull
 import dev.jacobandersen.microformats2.texts
+import java.net.URI
 
 /**
  * Analyzes a parsed source document for webmention purposes: picks the primary
@@ -119,6 +120,38 @@ object ReceivedWebmentionAnalyzer {
         val trimmed = url.trim()
         val page = trimmed.substringBefore('#').trimEnd('/')
         return if ('#' in trimmed) "$page#${trimmed.substringAfter('#')}" else page
+    }
+
+    /**
+     * The URLs that identify a stored response: its source URL, plus its
+     * canonical URL only when that shares the source's origin, so a source
+     * cannot claim another site's response by declaring its URL.
+     */
+    fun identityUrls(
+        sourceUrl: String,
+        url: String?,
+    ): List<String> = listOfNotNull(sourceUrl, url?.takeIf { sameOrigin(sourceUrl, it) })
+
+    private fun sameOrigin(
+        a: String,
+        b: String,
+    ): Boolean {
+        val left = originOf(a) ?: return false
+        return left == originOf(b)
+    }
+
+    private fun originOf(url: String): Triple<String, String, Int>? {
+        val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase() ?: return null
+        val host = uri.host?.lowercase() ?: return null
+        val port =
+            when {
+                uri.port != -1 -> uri.port
+                scheme == "https" -> 443
+                scheme == "http" -> 80
+                else -> -1
+            }
+        return Triple(scheme, host, port)
     }
 
     /** A URL normalized to its page: no fragment and no trailing slash. */

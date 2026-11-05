@@ -17,7 +17,7 @@ data class ThreadedWebmention(
  * that arrive before their parent still thread once the parent is known.
  *
  * A response's parent is the first other response whose source URL or
- * canonical URL appears in its `in-reply-to`, matched on the exact URL first
+ * same-origin canonical URL appears in its `in-reply-to`, matched on the exact URL first
  * and then on its page without the fragment. A nested response that names no
  * known parent falls back to the source that displays it. Nested responses
  * whose displaying source is not shown are hidden, and a reply cycle is broken
@@ -36,7 +36,7 @@ object WebmentionThreadResolver {
         val byKey = mutableMapOf<String, ReceivedWebmention>()
         val byPage = mutableMapOf<String, ReceivedWebmention>()
         visible.forEach { mention ->
-            listOfNotNull(mention.sourceUrl, urlOf[mention.id]).forEach { url ->
+            ReceivedWebmentionAnalyzer.identityUrls(mention.sourceUrl, urlOf[mention.id]).forEach { url ->
                 byKey.putIfAbsent(ReceivedWebmentionAnalyzer.urlKey(url), mention)
                 if ('#' !in url) byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
             }

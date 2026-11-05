@@ -196,4 +196,21 @@ class WebmentionThreadResolverTest {
 
         assertEquals("https://bob.example/post", threaded.parentOf(dave))
     }
+
+    @Test
+    fun `a cross-origin u-url does not capture replies to another site's response`() {
+        val bobEntry = mention(bob, listOf(alice), seenAt = 1)
+        val dave = "https://dave.example/r/1"
+        val threaded =
+            WebmentionThreadResolver.resolve(
+                listOf(
+                    mention("https://mallory.example/fake", listOf(alice), seenAt = 0, url = carol),
+                    bobEntry,
+                    mention(carol, null, seenAt = 2, url = carol, viaId = bobEntry.id),
+                    mention(dave, listOf(carol), seenAt = 3),
+                ),
+            )
+
+        assertEquals(carol, threaded.parentOf(dave))
+    }
 }

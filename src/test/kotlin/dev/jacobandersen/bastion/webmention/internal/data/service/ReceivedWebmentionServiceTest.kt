@@ -444,15 +444,15 @@ class ReceivedWebmentionServiceTest {
     }
 
     @Test
-    fun `a nested copy is hidden behind a direct webmention whose canonical url matches`() {
+    fun `a nested copy is hidden behind a direct webmention whose same-origin canonical url matches`() {
         val parent = verifiedParent()
-        val bridgy =
+        val direct =
             entity(state = ReceivedWebmentionState.VERIFIED).also {
                 it.id = UUID.randomUUID()
-                it.sourceUrl = "https://brid.gy/comment/mastodon/carol/123"
+                it.sourceUrl = "https://CAROL.example:443/?p=123"
                 it.url = "$carolUrl/"
             }
-        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent, bridgy))
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent, direct))
 
         val withCarol = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol()))).webmention.displayFingerprint
         val withoutCarol = service.markVerified(sourceUrl, postId, reply("Bob")).webmention.displayFingerprint
@@ -479,11 +479,11 @@ class ReceivedWebmentionServiceTest {
     }
 
     @Test
-    fun `a verified direct webmention takes over a nested copy at its canonical url`() {
+    fun `a verified direct webmention takes over a nested copy at its same-origin canonical url`() {
         val direct =
             entity().also {
                 it.id = UUID.randomUUID()
-                it.sourceUrl = "https://brid.gy/comment/mastodon/carol/123"
+                it.sourceUrl = "https://carol.example/?p=123"
                 `when`(repository.findBySourceUrlAndPostId(it.sourceUrl, postId)).thenReturn(it)
             }
         val nestedCopy =
@@ -642,5 +642,44 @@ class ReceivedWebmentionServiceTest {
 
         assertEquals(parent.id, stale.viaId)
         verify(repository).deleteAll(listOf(stale))
+    }
+
+    private val malloryUrl = "https://mallory.example/fake"
+
+    @Test
+    fun `a cross-origin u-url does not hide a nested copy`() {
+        val parent = verifiedParent()
+        val mallory =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = malloryUrl
+                it.url = carolUrl
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent, mallory))
+
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertEquals(listOf(carolUrl), savedEntities().filter { it.viaId == parent.id }.map { it.sourceUrl }.distinct())
+    }
+
+    @Test
+    fun `verifying a webmention with a cross-origin u-url does not delete a nested copy`() {
+        val mallory =
+            entity().also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = malloryUrl
+                `when`(repository.findBySourceUrlAndPostId(malloryUrl, postId)).thenReturn(it)
+            }
+        val nestedCopy =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(mallory, nestedCopy))
+
+        service.markVerified(malloryUrl, postId, ReceivedWebmentionAnalysis(WebmentionInteraction.REPLY, primary = null, url = carolUrl))
+
+        verify(repository, never()).deleteAll(any<List<ReceivedWebmentionEntity>>())
     }
 }
