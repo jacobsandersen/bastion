@@ -242,7 +242,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
     source's origin (`ReceivedWebmentionAnalyzer.identityUrls`), so a webmention cannot suppress another site's
     response. Tradeoff: a cross-origin proxy reply (Bridgy) that is also displayed nested can appear twice. Threading
     also indexes cross-origin `u-url`s, but only as lowest-priority fallback keys, so Bridgy reply chains thread while a
-    spoofer can only capture URLs no other row claims; moderation is the future remedy for bad actors. The API exposes
+    spoofer can only capture URLs no other row claims. Own content URLs (`ContentUrlMatcher`) are never thread keys, so
+    no response can claim the post itself; moderation is the future remedy for bad actors. The API exposes
     `urlSameOrigin` so the frontend can tell a verified `url` from a source's cross-origin claim.
   - `display_fingerprint` survives `ensurePending`. Only a real change in what the post displays enqueues
     `SalmentionService.resendAfterResponseChange`, which runs `reconcile(refresh = true)` to re-ping the post's

@@ -6,19 +6,21 @@ import dev.jacobandersen.bastion.webmention.internal.data.service.ReceivedWebmen
 import dev.jacobandersen.bastion.webmention.internal.service.ReceivedWebmentionAnalyzer
 import dev.jacobandersen.bastion.webmention.internal.service.ThreadedWebmention
 import dev.jacobandersen.bastion.webmention.internal.service.WebmentionThreadResolver
+import dev.jacobandersen.bastion.url.ContentUrlMatcher
 import org.springframework.stereotype.Service
 import java.util.UUID
 
 @Service
 class WebmentionReadService(
     private val receivedWebmentionService: ReceivedWebmentionService,
+    private val contentUrlMatcher: ContentUrlMatcher,
 ) {
     /** Verified webmentions for a post, oldest first, each with its place in the reply thread. */
     fun verifiedByPost(postId: UUID): List<WebmentionView> =
-        WebmentionThreadResolver.resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
+        resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
 
     fun countsForPost(postId: UUID): WebmentionCountsView =
-        countsOf(WebmentionThreadResolver.resolve(receivedWebmentionService.verifiedByPost(postId)))
+        countsOf(resolve(receivedWebmentionService.verifiedByPost(postId)))
 
     fun countsByPostIds(postIds: Collection<UUID>): Map<UUID, WebmentionCountsView> = byPostIds(postIds).mapValues { it.value.counts }
 
@@ -31,13 +33,16 @@ class WebmentionReadService(
 
         val byPost = receivedWebmentionService.verifiedByPostIds(postIds).groupBy { it.postId }
         return postIds.associateWith { postId ->
-            val threaded = WebmentionThreadResolver.resolve(byPost[postId].orEmpty())
+            val threaded = resolve(byPost[postId].orEmpty())
             PostWebmentionsView(
                 counts = countsOf(threaded),
                 webmentions = threaded.map(::toView),
             )
         }
     }
+
+    private fun resolve(mentions: List<ReceivedWebmention>): List<ThreadedWebmention> =
+        WebmentionThreadResolver.resolve(mentions, contentUrlMatcher::isOwnContentUrl)
 
     private fun countsOf(mentions: List<ThreadedWebmention>): WebmentionCountsView =
         WebmentionCountsView.of(

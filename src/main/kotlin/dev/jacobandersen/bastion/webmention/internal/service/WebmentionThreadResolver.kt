@@ -27,7 +27,11 @@ data class ThreadedWebmention(
  * only lead into a cycle keep their parent.
  */
 object WebmentionThreadResolver {
-    fun resolve(mentions: List<ReceivedWebmention>): List<ThreadedWebmention> {
+    /** [isOwnContent] marks this site's own URLs, which never identify a received response. */
+    fun resolve(
+        mentions: List<ReceivedWebmention>,
+        isOwnContent: (String) -> Boolean,
+    ): List<ThreadedWebmention> {
         val byId = mentions.associateBy { it.id }
         val visible = mentions.filter { it.viaId == null || it.viaId in byId }.sortedBy { it.firstSeenAt }
 
@@ -41,6 +45,7 @@ object WebmentionThreadResolver {
             mention: ReceivedWebmention,
             url: String,
         ) {
+            if (isOwnContent(url)) return
             byKey.putIfAbsent(ReceivedWebmentionAnalyzer.urlKey(url), mention)
             if ('#' !in url) byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
         }

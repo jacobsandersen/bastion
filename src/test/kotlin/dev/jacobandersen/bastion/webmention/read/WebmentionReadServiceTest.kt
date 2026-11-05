@@ -1,5 +1,7 @@
 package dev.jacobandersen.bastion.webmention.read
 
+import dev.jacobandersen.bastion.url.ContentUrlConfig
+import dev.jacobandersen.bastion.url.ContentUrlMatcher
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmention
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionState
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
@@ -14,7 +16,11 @@ import java.util.UUID
 class WebmentionReadServiceTest {
     private val postId = UUID.randomUUID()
     private val received: ReceivedWebmentionService = mock()
-    private val service = WebmentionReadService(received)
+    private val service =
+        WebmentionReadService(
+            received,
+            ContentUrlMatcher(ContentUrlConfig(baseUrl = "https://alice.example", pathPattern = "{year}/{month}/{day}/{slug}")),
+        )
 
     private fun mention(
         sourceUrl: String,
@@ -62,5 +68,21 @@ class WebmentionReadServiceTest {
             ),
             views,
         )
+    }
+
+    @Test
+    fun `a response claiming the post's own url does not become the parent of other replies`() {
+        val bob =
+            mention("https://bob.example/r/1", null).copy(
+                inReplyTo = listOf("https://alice.example/post"),
+                firstSeenAt = Instant.ofEpochSecond(1),
+            )
+        whenever(received.verifiedByPost(postId)).thenReturn(
+            listOf(mention("https://mallory.example/x", "http://alice.example/post/"), bob),
+        )
+
+        val parents = service.verifiedByPost(postId).associate { it.sourceUrl to it.parentSourceUrl }
+
+        assertEquals(null, parents["https://bob.example/r/1"])
     }
 }

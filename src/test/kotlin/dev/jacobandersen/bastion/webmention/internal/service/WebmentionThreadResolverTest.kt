@@ -47,12 +47,15 @@ class WebmentionThreadResolverTest {
         updatedAtUtc = Instant.ofEpochSecond(seenAt),
     )
 
+    private fun resolve(mentions: List<ReceivedWebmention>) =
+        WebmentionThreadResolver.resolve(mentions) { it.startsWith("https://alice.example/") }
+
     private fun List<ThreadedWebmention>.parentOf(sourceUrl: String) = single { it.mention.sourceUrl == sourceUrl }.parent?.sourceUrl
 
     @Test
     fun `threads a direct reply to a reply under its parent`() {
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention(bob, listOf(alice), seenAt = 1),
                     mention(carol, listOf("$bob#comment", alice), seenAt = 2),
@@ -66,7 +69,7 @@ class WebmentionThreadResolverTest {
     @Test
     fun `threads replies that arrived before their parent`() {
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention(carol, listOf(bob), seenAt = 1),
                     mention(bob, listOf(alice), seenAt = 2),
@@ -80,7 +83,7 @@ class WebmentionThreadResolverTest {
     @Test
     fun `matches a parent by its canonical url`() {
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention("https://bob.example/?p=1", listOf(alice), seenAt = 1, url = "$bob/"),
                     mention(carol, listOf(bob), seenAt = 2),
@@ -94,7 +97,7 @@ class WebmentionThreadResolverTest {
     fun `falls back to the displaying source for a nested response with no known parent`() {
         val via = mention(bob, listOf(alice), seenAt = 1)
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(via, mention(carol, emptyList(), seenAt = 2, viaId = via.id)),
             )
 
@@ -105,7 +108,7 @@ class WebmentionThreadResolverTest {
     @Test
     fun `hides nested responses whose displaying source is not shown`() {
         val threaded =
-            WebmentionThreadResolver.resolve(listOf(mention(carol, listOf(bob), seenAt = 2, viaId = UUID.randomUUID())))
+            resolve(listOf(mention(carol, listOf(bob), seenAt = 2, viaId = UUID.randomUUID())))
 
         assertEquals(emptyList<ThreadedWebmention>(), threaded)
     }
@@ -113,7 +116,7 @@ class WebmentionThreadResolverTest {
     @Test
     fun `breaks reply cycles at the oldest response`() {
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention(bob, listOf(carol), seenAt = 1),
                     mention(carol, listOf(bob), seenAt = 2),
@@ -132,7 +135,7 @@ class WebmentionThreadResolverTest {
                 properties = mapOf("in-reply-to" to listOf(Mf2Value.String(bob))),
             )
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention(bob, null, seenAt = 1),
                     mention(carol, null, seenAt = 2, rawMf2 = raw),
@@ -147,7 +150,7 @@ class WebmentionThreadResolverTest {
     fun `keeps the parent of a response that only leads into a cycle`() {
         val dave = "https://dave.example/r/1"
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention(bob, listOf(carol), seenAt = 1),
                     mention(carol, listOf(dave), seenAt = 2),
@@ -165,7 +168,7 @@ class WebmentionThreadResolverTest {
         val bobPage = "https://bob.example/post/"
         val bobEntry = mention(bobPage, listOf(alice), seenAt = 1)
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     bobEntry,
                     mention("$bobPage#comment-12", listOf(bobPage), seenAt = 2, viaId = bobEntry.id),
@@ -185,7 +188,7 @@ class WebmentionThreadResolverTest {
         val comment1 = "https://bob.example/post#comment-1"
         val dave = "https://dave.example/r/1"
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     eve,
                     mention(comment1, listOf("https://bob.example/elsewhere"), seenAt = 2, viaId = eve.id),
@@ -202,7 +205,7 @@ class WebmentionThreadResolverTest {
         val bobEntry = mention(bob, listOf(alice), seenAt = 1)
         val dave = "https://dave.example/r/1"
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention("https://mallory.example/fake", listOf(alice), seenAt = 0, url = carol),
                     bobEntry,
@@ -220,7 +223,7 @@ class WebmentionThreadResolverTest {
         val bobBridgy = "https://brid.gy/comment/mastodon/alice/1/bob"
         val carolBridgy = "https://brid.gy/comment/mastodon/alice/1/carol"
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention(bobBridgy, listOf(alice), seenAt = 1, url = bobMastodon),
                     mention(carolBridgy, listOf(alice, bobMastodon), seenAt = 2, url = "https://mastodon.social/@carol/2"),
@@ -234,7 +237,7 @@ class WebmentionThreadResolverTest {
     fun `an older cross-origin u-url does not displace the response that owns the url`() {
         val dave = "https://dave.example/r/1"
         val threaded =
-            WebmentionThreadResolver.resolve(
+            resolve(
                 listOf(
                     mention("https://mallory.example/fake", listOf(alice), seenAt = 0, url = "$carol/"),
                     mention(carol, listOf(alice), seenAt = 5),
@@ -243,5 +246,20 @@ class WebmentionThreadResolverTest {
             )
 
         assertEquals(carol, threaded.parentOf(dave))
+    }
+
+    @Test
+    fun `a cross-origin u-url naming the post itself captures no replies`() {
+        val threaded =
+            resolve(
+                listOf(
+                    mention("https://mallory.example/x", listOf(alice), seenAt = 0, url = alice),
+                    mention(bob, listOf(alice), seenAt = 1),
+                    mention(carol, listOf(alice, bob), seenAt = 2),
+                ),
+            )
+
+        assertNull(threaded.parentOf(bob))
+        assertEquals(bob, threaded.parentOf(carol))
     }
 }
