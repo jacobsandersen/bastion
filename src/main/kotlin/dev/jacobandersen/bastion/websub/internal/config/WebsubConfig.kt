@@ -37,7 +37,9 @@ data class WebsubConfig(
      * @property main The main feed. Pinged for every feed-visible change.
      * @property uncategorized The feed of posts without tags.
      * @property type Template with `{type}` for per-post-type feeds.
-     * @property typeNames The post types that have a feed. Empty means every type.
+     * @property types The post types that have a feed, as `type=name` entries where `name` is what
+     *   the frontend uses for `{type}` (e.g. `article=articles,note=notes`). A bare `type` uses its own
+     *   name. Empty means every type, under its own name.
      * @property tag Template with `{tag}` for per-tag feeds (the tag as written, no `#`).
      * @property year Template with `{year}` for per-year feeds. Only the current
      *   year is pinged; earlier years are archives.
@@ -46,10 +48,21 @@ data class WebsubConfig(
         val main: String = "",
         val uncategorized: String = "",
         val type: String = "",
-        val typeNames: List<String> = emptyList(),
+        val types: List<String> = emptyList(),
         val tag: String = "",
         val year: String = "",
     ) {
+        /** [types] parsed into post type to feed name. */
+        val feedNames: Map<String, String> =
+            types
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .associate { entry ->
+                    val type = entry.substringBefore('=').trim()
+                    require(type.isNotEmpty()) { "bastion.websub.topics.types has an entry without a type: '$entry'" }
+                    type to entry.substringAfter('=', "").trim().ifEmpty { type }
+                }
+
         init {
             require(type.isBlank() || "{type}" in type) { "bastion.websub.topics.type must contain {type}" }
             require(tag.isBlank() || "{tag}" in tag) { "bastion.websub.topics.tag must contain {tag}" }
