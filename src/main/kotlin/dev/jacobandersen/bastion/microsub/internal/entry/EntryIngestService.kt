@@ -17,10 +17,14 @@ class EntryIngestService(
     private val entries: EntryRepository,
     private val moderation: ModerationRepository,
 ) {
+    /**
+     * Stores a feed's items. Item ids (JSON Feed `id`, RSS `guid`) are only
+     * unique within one feed, so the source key is scoped to [feedId].
+     */
     @Transactional
     fun ingest(
         channelId: UUID,
-        feedId: UUID?,
+        feedId: UUID,
         items: List<Jf2Item>,
         read: Boolean,
     ): Int {
@@ -28,7 +32,7 @@ class EntryIngestService(
         var stored = 0
         items.forEach { item ->
             if (item.authorUrl != null && moderation.isBlocked(channelId, item.authorUrl)) return@forEach
-            ingestOne(channelId, feedId, item.sourceKey, item, read, now)
+            ingestOne(channelId, feedId, feedSourceKey(feedId, item), item, read, now)
             stored++
         }
         return stored
@@ -47,4 +51,9 @@ class EntryIngestService(
         val published = item.published?.coerceAtMost(now) ?: now
         entries.upsert(channelId, feedId, sourceKey, item, published, item.published != null, read, now)
     }
+
+    private fun feedSourceKey(
+        feedId: UUID,
+        item: Jf2Item,
+    ) = "feed:$feedId:${item.sourceKey}"
 }

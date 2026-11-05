@@ -19,7 +19,9 @@ data class PageRequest(
 /**
  * Timelines and content search (spec sections 5 and 7). Pages are newest
  * first. `before` is returned whenever items are, and `after` only when
- * older items remain, as the paging rules require.
+ * older items remain, as the paging rules require. A `before`-only page holds
+ * the entries just newer than the cursor, so nothing older than it remains
+ * unseen and it carries no `after`.
  */
 @Service
 class TimelineService(
@@ -105,11 +107,12 @@ class TimelineService(
         query: EntryQuery,
     ): Map<String, Any> {
         val rows = entries.page(query)
-        val items = rows.take(query.limit)
+        val page = rows.take(query.limit)
+        val items = if (query.ascending) page.reversed() else page
         val paging =
             buildMap {
                 items.firstOrNull()?.let { put("before", it.cursor.encode()) }
-                if (rows.size > query.limit) put("after", items.last().cursor.encode())
+                if (!query.ascending && rows.size > query.limit) put("after", items.last().cursor.encode())
             }
         return mapOf("items" to items.map(::serve), "paging" to paging)
     }

@@ -4,7 +4,9 @@ import com.sun.net.httpserver.HttpServer
 import dev.jacobandersen.bastion.TestcontainersConfiguration
 import dev.jacobandersen.bastion.indieauth.query.AccessTokenQueryService
 import dev.jacobandersen.bastion.indieauth.query.ValidatedAccessToken
+import dev.jacobandersen.bastion.microsub.internal.feed.FeedRefreshService
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedHostValidator
+import dev.jacobandersen.bastion.microsub.internal.job.EntryRetentionService
 import dev.jacobandersen.bastion.webmention.events.ReceivedWebmentionChangedEvent
 import dev.jacobandersen.bastion.webmention.read.WebmentionReadService
 import dev.jacobandersen.bastion.webmention.read.WebmentionView
@@ -26,6 +28,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
+import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -65,6 +68,15 @@ class MicrosubIntegrationTest {
 
     @Autowired
     lateinit var transactions: TransactionTemplate
+
+    @Autowired
+    lateinit var jdbc: JdbcClient
+
+    @Autowired
+    lateinit var refresh: FeedRefreshService
+
+    @Autowired
+    lateinit var retention: EntryRetentionService
 
     @MockitoBean
     lateinit var tokens: AccessTokenQueryService
@@ -390,6 +402,132 @@ class MicrosubIntegrationTest {
         mockMvc
             .perform(get("/microsub").auth().param("action", "follow").param("channel", channel))
             .andExpect(jsonPath("$.items", hasSize<Any>(0)))
+    }
+
+    private fun follow(
+        channel: String,
+        path: String,
+    ) {
+        mockMvc
+            .perform(
+                post("/microsub")
+                    .auth()
+                    .param("action", "follow")
+                    .param("channel", channel)
+                    .param("url", "$base$path"),
+            ).andExpect(status().isOk)
+    }
+
+    private fun feedId(channel: String): UUID =
+        jdbc
+            .sql("select f.id from microsub_feeds f join microsub_channels c on c.id = f.channel_id where c.uid = :uid")
+            .param("uid", channel)
+            .query(UUID::class.java)
+            .single()
+
+    private fun timeline(
+        channel: String,
+        vararg params: Pair<String, String>,
+    ): JsonNode {
+        val request = get("/microsub").auth().param("action", "timeline").param("channel", channel)
+        params.forEach { (key, value) -> request.param(key, value) }
+        return json(mockMvc.perform(request).andExpect(status().isOk))
+    }
+
+    private fun urls(page: JsonNode): List<String> = page["items"].toList().map { it["url"].asString() }
+
+    @Test
+    fun `pages forward from a before cursor without skipping entries`() {
+        pages["/paged"] = "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/paged")
+        val top = timeline(channel)["paging"]["before"].asString()
+
+        pages["/paged"] =
+            "text/html" to hFeed(*(1..5).map { hEntry("p$it", "Entry $it", "https://alice.example/") }.toTypedArray())
+        refresh.refreshClaimed(feedId(channel))
+
+        val next = timeline(channel, "before" to top, "limit" to "2")
+        assertEquals(listOf("$base/p3", "$base/p2"), urls(next))
+        assertFalse(next["paging"].has("after"), "nothing older than the page is unseen")
+
+        val last = timeline(channel, "before" to next["paging"]["before"].asString(), "limit" to "2")
+        assertEquals(listOf("$base/p5", "$base/p4"), urls(last))
+
+        val none = timeline(channel, "before" to last["paging"]["before"].asString(), "limit" to "2")
+        assertEquals(0, none["items"].size())
+    }
+
+    @Test
+    fun `keeps entries from different feeds that share an item id apart`() {
+        pages["/one"] = "text/html" to hFeed(hEntry("p1", "From feed one", "https://alice.example/"))
+        pages["/two"] = "text/html" to hFeed(hEntry("p1", "From feed two", "https://bob.example/"))
+        val channel = newChannel()
+        follow(channel, "/one")
+        follow(channel, "/two")
+
+        val items = timeline(channel)["items"].toList()
+        assertEquals(setOf("$base/one", "$base/two"), items.map { it["_source"]["url"].asString() }.toSet())
+    }
+
+    @Test
+    fun `purges read entries only after they drop out of their feed`() {
+        pages["/kept"] =
+            "text/html" to hFeed(hEntry("p1", "Dropped", "https://alice.example/"), hEntry("p2", "Kept", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/kept")
+        assertEquals(0, unread(channel), "backfilled entries start read")
+
+        val longAgo = java.sql.Timestamp.from(Instant.now().minus(Duration.ofDays(60)))
+        jdbc
+            .sql(
+                "update microsub_entries set updated_at = :at, last_seen_at = :at " +
+                    "where channel_id = (select id from microsub_channels where uid = :uid)",
+            ).param("at", longAgo)
+            .param("uid", channel)
+            .update()
+        pages["/kept"] = "text/html" to hFeed(hEntry("p2", "Kept", "https://alice.example/"))
+        refresh.refreshClaimed(feedId(channel))
+
+        retention.purge()
+
+        assertEquals(listOf("$base/p2"), urls(timeline(channel)))
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(0, unread(channel), "a re-fetch does not bring the kept entry back unread")
+    }
+
+    @Test
+    fun `releases WebSub subscriptions when a channel is deleted`() {
+        pages["/hubbed"] =
+            "text/html" to
+            "<html><head><link rel=\"hub\" href=\"https://hub.example/\"><link rel=\"self\" href=\"$base/hubbed\"></head>" +
+            "<body><div class=\"h-feed\">${hEntry("p1", "Hubbed", "https://alice.example/")}</div></body></html>"
+        val channel = newChannel()
+        follow(channel, "/hubbed")
+        val subscription =
+            jdbc
+                .sql("select websub_subscription_id from microsub_feeds where id = :id")
+                .param("id", feedId(channel))
+                .query(UUID::class.java)
+                .single()
+        assertNotNull(subscription)
+
+        mockMvc
+            .perform(
+                post("/microsub")
+                    .auth()
+                    .param("action", "channels")
+                    .param("method", "delete")
+                    .param("channel", channel),
+            ).andExpect(status().isOk)
+
+        val state =
+            jdbc
+                .sql("select state from websub_subscriptions where id = :id")
+                .param("id", subscription)
+                .query(String::class.java)
+                .optional()
+        assertTrue(state.isEmpty || state.get() == "UNSUBSCRIBING", "subscription is released, state was $state")
     }
 
     @Test

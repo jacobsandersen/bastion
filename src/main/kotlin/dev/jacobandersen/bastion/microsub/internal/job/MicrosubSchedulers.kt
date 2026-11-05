@@ -18,7 +18,7 @@ class EntryRetentionService(
     private val entries: EntryRepository,
     private val config: MicrosubConfig,
 ) {
-    /** JobRunr entry point: deletes read or removed entries older than the retention window. */
+    /** JobRunr entry point: deletes read or removed entries not seen in their feed within the retention window. */
     fun purge() {
         val deleted = entries.purge(Instant.now().minus(config.retention))
         if (deleted > 0) logger.info { "Purged $deleted old Microsub entries" }

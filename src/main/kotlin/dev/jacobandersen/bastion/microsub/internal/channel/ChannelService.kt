@@ -1,6 +1,8 @@
 package dev.jacobandersen.bastion.microsub.internal.channel
 
 import com.github.slugify.Slugify
+import dev.jacobandersen.bastion.microsub.internal.feed.FeedRefreshService
+import dev.jacobandersen.bastion.microsub.internal.feed.FeedRepository
 import dev.jacobandersen.bastion.microsub.internal.web.MicrosubError
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -10,12 +12,15 @@ import java.util.UUID
 /**
  * Microsub channels. `notifications` always exists, always sorts first and
  * cannot be deleted or reordered. Renaming never changes a uid, which the
- * spec allows (a server MAY change it and MUST return it).
+ * spec allows (a server MAY change it and MUST return it). Deleting a channel
+ * releases the WebSub subscriptions its feeds no longer need.
  */
 @Service
 class ChannelService(
     private val repository: ChannelRepository,
     private val slugify: Slugify,
+    private val feeds: FeedRepository,
+    private val refresh: FeedRefreshService,
 ) {
     @Transactional(readOnly = true)
     fun list(): List<Map<String, Any>> {
@@ -62,7 +67,9 @@ class ChannelService(
     fun delete(uid: String?) {
         val channel = require(uid)
         if (channel.uid == NOTIFICATIONS) throw MicrosubError.invalidRequest("The notifications channel cannot be deleted")
+        val subscriptions = feeds.listByChannel(channel.id).mapNotNull { it.subscriptionId }.distinct()
         repository.delete(channel.id)
+        subscriptions.forEach(refresh::releaseSubscription)
     }
 
     /**

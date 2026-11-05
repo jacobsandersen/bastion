@@ -5,10 +5,19 @@ import dev.jacobandersen.bastion.microsub.internal.jf2.MicrosubUrls
 import dev.jacobandersen.bastion.util.HttpUtil
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Component
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.ByteBuffer
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Flow
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 private val logger = KotlinLogging.logger {}
 
@@ -52,7 +61,8 @@ class DefaultFeedHostValidator : FeedHostValidator {
 /**
  * Fetches untrusted feed URLs. Redirects are followed by hand so every hop is
  * checked against private and loopback addresses (SSRF), bodies are capped,
- * and requests carry no user-identifying data, which also keeps `preview`
+ * each request including its body must finish within the read timeout, and
+ * requests carry no user-identifying data, which also keeps `preview`
  * anonymous as the spec asks.
  */
 @Component
@@ -100,21 +110,16 @@ class FeedFetcher(
                         }
                     }.GET()
                     .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            val response = send(request)
             val status = response.statusCode()
             if (status in REDIRECTS) {
-                response.body().close()
                 val location = response.headers().firstValue("Location").orElse(null)
                 current =
                     MicrosubUrls.resolve(current, location) ?: return FetchResult.failed(current, "redirect without a usable Location")
                 return@repeat
             }
 
-            val body =
-                response.body().use { stream ->
-                    stream.readNBytes(config.maxBodyBytes + 1)
-                }
-            if (body.size > config.maxBodyBytes) return FetchResult.failed(current, "feed exceeds ${config.maxBodyBytes} bytes")
+            val body = response.body() ?: return FetchResult.failed(current, "feed exceeds ${config.maxBodyBytes} bytes")
 
             val headers = response.headers()
             return FetchResult(
@@ -128,6 +133,59 @@ class FeedFetcher(
             )
         }
         return FetchResult.failed(startUrl, "too many redirects")
+    }
+
+    /**
+     * Sends [request] and reads its body under one deadline, so a host that
+     * trickles bytes cannot hold the caller longer than the read timeout.
+     */
+    private fun send(request: HttpRequest): HttpResponse<ByteArray?> {
+        val future = client.sendAsync(request) { CappedBodySubscriber(config.maxBodyBytes) }
+        return try {
+            future.get(config.readTimeout.toMillis(), TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            future.cancel(true)
+            throw IOException("timed out after ${config.readTimeout}", e)
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        }
+    }
+
+    /** Collects a body up to [max] bytes; completes with null and cancels the transfer once it is larger. */
+    private class CappedBodySubscriber(
+        private val max: Int,
+    ) : HttpResponse.BodySubscriber<ByteArray?> {
+        private val result = CompletableFuture<ByteArray?>()
+        private val buffer = ByteArrayOutputStream()
+        private lateinit var subscription: Flow.Subscription
+
+        override fun getBody(): CompletionStage<ByteArray?> = result
+
+        override fun onSubscribe(subscription: Flow.Subscription) {
+            this.subscription = subscription
+            subscription.request(Long.MAX_VALUE)
+        }
+
+        override fun onNext(item: List<ByteBuffer>) {
+            if (result.isDone) return
+            item.forEach { chunk ->
+                val bytes = ByteArray(chunk.remaining())
+                chunk.get(bytes)
+                buffer.write(bytes)
+            }
+            if (buffer.size() > max) {
+                subscription.cancel()
+                result.complete(null)
+            }
+        }
+
+        override fun onError(throwable: Throwable) {
+            result.completeExceptionally(throwable)
+        }
+
+        override fun onComplete() {
+            result.complete(buffer.toByteArray())
+        }
     }
 
     companion object {

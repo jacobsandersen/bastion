@@ -14,6 +14,21 @@ class HubSignatureTest {
         algorithm: String,
     ) = "$method=" + HexFormat.of().formatHex(HubSignature.sign(algorithm, secret, body))
 
+    private val vectorKey = "key"
+    private val vectorBody = "The quick brown fox jumps over the lazy dog".toByteArray()
+
+    @Test
+    fun `accepts published HMAC test vectors`() {
+        val sha256 = "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        val sha1 = "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9"
+
+        assertTrue(HubSignature.isValid("sha256=$sha256", vectorKey, vectorBody))
+        assertTrue(HubSignature.isValid("sha1=$sha1", vectorKey, vectorBody))
+        assertFalse(HubSignature.isValid("sha256=${sha256.dropLast(1)}9", vectorKey, vectorBody))
+        assertFalse(HubSignature.isValid("sha1=${sha1.dropLast(1)}8", vectorKey, vectorBody))
+        assertFalse(HubSignature.isValid("sha1=$sha256", vectorKey, vectorBody))
+    }
+
     @Test
     fun `accepts every algorithm the spec allows`() {
         assertTrue(HubSignature.isValid(header("sha1", "HmacSHA1"), secret, body))

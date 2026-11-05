@@ -231,7 +231,7 @@ class FeedRepository(
     /** Releases the claim; a refresh requested while this fetch ran makes the feed due again right away. */
     private fun release() =
         """
-        next_fetch_at = case when refresh_requested_at > fetch_started_at then :now else :next end,
+        next_fetch_at = case when refresh_requested_at > fetch_started_at then cast(:now as timestamptz) else cast(:next as timestamptz) end,
         claimed_until = null
         """.trimIndent()
 

@@ -15,7 +15,7 @@ import java.time.Duration
  * @property maxBodyBytes Feed documents larger than this are rejected.
  * @property maxItemsPerFetch The most entries taken from one feed document.
  * @property backfillAsRead Whether the entries ingested when following a feed start out read.
- * @property retention Read or removed entries older than this are deleted.
+ * @property retention Read or removed entries not seen in their feed for this long are deleted.
  * @property defaultLimit Timeline page size when the client gives none.
  * @property maxLimit Largest timeline page served.
  */

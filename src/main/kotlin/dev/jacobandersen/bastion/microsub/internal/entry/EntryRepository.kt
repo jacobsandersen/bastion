@@ -41,7 +41,15 @@ data class EntryQuery(
     val authors: List<String> = emptyList(),
     val categories: List<String> = emptyList(),
     val kinds: List<String> = emptyList(),
-)
+) {
+    /**
+     * A `before`-only page reads upward from the cursor so it returns the
+     * entries nearest the cursor rather than the newest ones.
+     */
+    val ascending: Boolean get() = before != null && after == null
+
+    val direction: String get() = if (ascending) "asc" else "desc"
+}
 
 @Repository
 class EntryRepository(
@@ -53,6 +61,8 @@ class EntryRepository(
      * refresh, so re-fetching a feed never resurrects removed entries or
      * marks read ones unread. An undated entry keeps the time it was first
      * seen ([dated] false) instead of moving to the top on every fetch.
+     * Every upsert records when the entry was last seen, which retention uses
+     * to keep entries that are still in their feed.
      */
     fun upsert(
         channelId: UUID,
@@ -68,20 +78,20 @@ class EntryRepository(
             .sql(
                 """
                 insert into microsub_entries (id, channel_id, feed_id, source_key, published, author_url, url, categories, kinds,
-                                              data, search, is_read, created_at, updated_at)
+                                              data, search, is_read, created_at, updated_at, last_seen_at)
                 values (:id, :channel, :feed, :key, :published, :author, :url, $TEXT_ARRAY_CATEGORIES, $TEXT_ARRAY_KINDS,
-                        cast(:data as jsonb), to_tsvector('simple', :search), :read, :now, :now)
+                        cast(:data as jsonb), to_tsvector('simple', :search), :read, :now, :now, :now)
                 on conflict (channel_id, source_key) do update set
                     feed_id = coalesce(excluded.feed_id, microsub_entries.feed_id),
-                    published = case when :dated then excluded.published else microsub_entries.published end,
+                    published = case when :dated and $DATA_CHANGED then excluded.published else microsub_entries.published end,
                     author_url = excluded.author_url,
                     url = excluded.url,
                     categories = excluded.categories,
                     kinds = excluded.kinds,
                     data = excluded.data,
                     search = excluded.search,
-                    updated_at = excluded.updated_at
-                where microsub_entries.data is distinct from excluded.data
+                    updated_at = case when $DATA_CHANGED then excluded.updated_at else microsub_entries.updated_at end,
+                    last_seen_at = excluded.last_seen_at
                 """.trimIndent(),
             ).param("id", UUID.randomUUID())
             .param("channel", channelId)
@@ -100,6 +110,7 @@ class EntryRepository(
             .update()
     }
 
+    /** Returns up to `limit + 1` rows in [EntryQuery.direction] order. */
     fun page(query: EntryQuery): List<EntryRow> {
         val where = mutableListOf("e.removed_at is null", NOT_MODERATED)
         val params = mutableMapOf<String, Any?>("limit" to query.limit + 1)
@@ -150,7 +161,7 @@ class EntryRepository(
                 from microsub_entries e
                 left join microsub_feeds f on f.id = e.feed_id
                 where ${where.joinToString(" and ")}
-                order by e.published desc, e.id desc
+                order by e.published ${query.direction}, e.id ${query.direction}
                 limit :limit
                 """.trimIndent(),
             ).params(params)
@@ -225,10 +236,14 @@ class EntryRepository(
             .param("author", authorUrl)
             .update()
 
-    /** Deletes read or removed entries last touched before [cutoff]. */
+    /**
+     * Deletes read or removed entries last seen before [cutoff]. Entries still
+     * in their feed are seen on every fetch, so they are never purged and a
+     * later fetch cannot bring them back unread.
+     */
     fun purge(cutoff: Instant): Int =
         jdbc
-            .sql("delete from microsub_entries where (is_read or removed_at is not null) and updated_at < :cutoff")
+            .sql("delete from microsub_entries where (is_read or removed_at is not null) and last_seen_at < :cutoff")
             .param("cutoff", Timestamp.from(cutoff))
             .update()
 
@@ -254,6 +269,7 @@ class EntryRepository(
     companion object {
         private const val TEXT_ARRAY_CATEGORIES = "array(select jsonb_array_elements_text(cast(:categories as jsonb)))"
         private const val TEXT_ARRAY_KINDS = "array(select jsonb_array_elements_text(cast(:kinds as jsonb)))"
+        private const val DATA_CHANGED = "microsub_entries.data is distinct from excluded.data"
 
         private const val NOT_MODERATED =
             """not exists (
