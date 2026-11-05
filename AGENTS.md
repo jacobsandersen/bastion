@@ -267,9 +267,10 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - Single user, persisted with `JdbcClient` (no JPA entities): `microsub_channels`, `microsub_feeds`,
   `microsub_entries` (jf2 in `data` jsonb, plus derived `author_url`/`categories`/`kinds`/`search` columns), and
   `microsub_moderation` (null `channel_id` = `global`). `V25` seeds `notifications` and `home`.
-- Entry `source_key` is unique per channel. Feed entries use `feed:<feedId>:<uid|url|hash>`, because item ids are only
-  unique within one feed; webmention entries use `webmention:<id>`. Every upsert sets `last_seen_at`, and retention
-  only purges read or removed entries not seen within the window, so entries still in a feed never come back unread.
+- Entry `source_key` is unique per channel. Feed entries use `feed:<followed feed url>:<uid|url|hash>`, because item
+  ids are only unique within one feed and the URL, unlike the feed row id, survives unfollow and re-follow; webmention
+  entries use `webmention:<id>`. Every upsert sets `last_seen_at`, and retention only purges read or removed entries
+  not seen within the window, so entries still in a feed never come back unread.
 - Feeds are parsed mf2-first (`Mf2FeedParser`), then `rel=alternate` RSS/Atom (Rome; DOCTYPEs rejected) or JSON Feed.
   `FeedFetcher` follows redirects by hand and checks every hop with `FeedHostValidator` (SSRF); tests override that
   bean to reach a local server.

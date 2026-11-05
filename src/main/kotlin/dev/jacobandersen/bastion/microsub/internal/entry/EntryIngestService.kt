@@ -19,12 +19,15 @@ class EntryIngestService(
 ) {
     /**
      * Stores a feed's items. Item ids (JSON Feed `id`, RSS `guid`) are only
-     * unique within one feed, so the source key is scoped to [feedId].
+     * unique within one feed, so the source key is scoped to the feed's
+     * followed [feedUrl], which is unique per channel and survives an
+     * unfollow and re-follow, unlike [feedId].
      */
     @Transactional
     fun ingest(
         channelId: UUID,
         feedId: UUID,
+        feedUrl: String,
         items: List<Jf2Item>,
         read: Boolean,
     ): Int {
@@ -32,7 +35,7 @@ class EntryIngestService(
         var stored = 0
         items.forEach { item ->
             if (item.authorUrl != null && moderation.isBlocked(channelId, item.authorUrl)) return@forEach
-            ingestOne(channelId, feedId, feedSourceKey(feedId, item), item, read, now)
+            ingestOne(channelId, feedId, feedSourceKey(feedUrl, item), item, read, now)
             stored++
         }
         return stored
@@ -53,7 +56,7 @@ class EntryIngestService(
     }
 
     private fun feedSourceKey(
-        feedId: UUID,
+        feedUrl: String,
         item: Jf2Item,
-    ) = "feed:$feedId:${item.sourceKey}"
+    ) = "feed:$feedUrl:${item.sourceKey}"
 }

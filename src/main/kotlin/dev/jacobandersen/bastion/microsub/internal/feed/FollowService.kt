@@ -52,7 +52,7 @@ class FollowService(
                 return feeds.findByChannelAndUrl(channel.id, normalized)?.let(::view)
                     ?: throw MicrosubError.invalidRequest("Concurrent follow of $normalized, please retry")
             }
-        ingest.ingest(channel.id, feed.id, load.feed.items, read = config.backfillAsRead)
+        ingest.ingest(channel.id, feed.id, feed.url, load.feed.items, read = config.backfillAsRead)
         refresh.syncSubscription(feed, load.feed)
         return view(feed)
     }

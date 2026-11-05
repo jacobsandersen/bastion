@@ -472,6 +472,28 @@ class MicrosubIntegrationTest {
     }
 
     @Test
+    fun `re-following a feed reattaches its kept entries instead of duplicating them`() {
+        pages["/refollow"] =
+            "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"), hEntry("p2", "Second", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/refollow")
+        mockMvc
+            .perform(
+                post("/microsub")
+                    .auth()
+                    .param("action", "unfollow")
+                    .param("channel", channel)
+                    .param("url", "$base/refollow"),
+            ).andExpect(status().isOk)
+
+        follow(channel, "/refollow")
+
+        val items = timeline(channel)["items"].toList()
+        assertEquals(listOf("$base/p2", "$base/p1"), items.map { it["url"].asString() })
+        assertTrue(items.all { it["_source"]["url"].asString() == "$base/refollow" }, "kept entries belong to the new feed")
+    }
+
+    @Test
     fun `purges read entries only after they drop out of their feed`() {
         pages["/kept"] =
             "text/html" to hFeed(hEntry("p1", "Dropped", "https://alice.example/"), hEntry("p2", "Kept", "https://alice.example/"))
