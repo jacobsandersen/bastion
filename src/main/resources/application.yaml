@@ -57,7 +57,7 @@ bastion:
       main: ${BASTION_WEBSUB_TOPICS_MAIN:}
       uncategorized: ${BASTION_WEBSUB_TOPICS_UNCATEGORIZED:}
       type: ${BASTION_WEBSUB_TOPICS_TYPE:}
-      type-names: ${BASTION_WEBSUB_TOPICS_TYPE_NAMES:}
+      types: ${BASTION_WEBSUB_TOPICS_TYPES:}
       tag: ${BASTION_WEBSUB_TOPICS_TAG:}
       year: ${BASTION_WEBSUB_TOPICS_YEAR:}
     connect-timeout-seconds: ${BASTION_WEBSUB_CONNECT_TIMEOUT_SECONDS:10}

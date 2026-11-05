@@ -150,7 +150,7 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - WebSub pings when the public feed changes (`Post.isFeedVisible`: published + PUBLIC + not deleted). This includes
   demotions and deletions, but not draft or UNLISTED edits, because UNLISTED posts are reachable by URL but absent from
   the public feed. Bastion serves no feeds and is format-agnostic (h-feed, Atom, ...): `bastion.websub.topics.*` are URL
-  templates for the frontend's feeds (main, uncategorized, `{type}` limited to `type-names`, `{tag}`, `{year}` - current
+  templates for the frontend's feeds (main, uncategorized, `{type}` limited to `types` (`type=name` entries, e.g. `BASTION_WEBSUB_TOPICS_TYPES=article=articles,note=notes`), `{tag}`, `{year}` - current
   year only). `PostChangedEvent` carries `previousFacets`/`facets` (`PostFeedFacets`), and `WebsubTopicResolver` pings
   the union of feeds the post was in and is in, so retagged/retyped posts also ping the feeds they left. Placeholders
   are encoded like JS `encodeURIComponent`; the publisher enqueues one job per hub and topic.

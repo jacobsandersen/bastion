@@ -16,7 +16,7 @@ class WebsubTopicResolverTest {
             main = "https://x.test/",
             uncategorized = "https://x.test/uncategorized",
             type = "https://x.test/{type}",
-            typeNames = listOf("note", "article"),
+            types = listOf("note", "article=articles"),
             tag = "https://x.test/tags/{tag}",
             year = "https://x.test/{year}",
         )
@@ -69,6 +69,14 @@ class WebsubTopicResolverTest {
     }
 
     @Test
+    fun `types are mapped to the frontend's feed name`() {
+        val result = resolver().resolve(event(current = facets(type = "article")), 2026)
+
+        assertEquals(true, "https://x.test/articles" in result)
+        assertEquals(false, "https://x.test/article" in result)
+    }
+
+    @Test
     fun `types without a feed are skipped`() {
         val result = resolver().resolve(event(current = facets(type = "event")), 2026)
 
@@ -77,7 +85,7 @@ class WebsubTopicResolverTest {
 
     @Test
     fun `empty type names allow every type`() {
-        val result = resolver(topics.copy(typeNames = emptyList())).resolve(event(current = facets(type = "event")), 2026)
+        val result = resolver(topics.copy(types = emptyList())).resolve(event(current = facets(type = "event")), 2026)
 
         assertEquals(true, "https://x.test/event" in result)
     }
@@ -104,7 +112,7 @@ class WebsubTopicResolverTest {
         assertEquals(true, "https://x.test/tags/old" in result)
         assertEquals(true, "https://x.test/tags/new" in result)
         assertEquals(true, "https://x.test/note" in result)
-        assertEquals(true, "https://x.test/article" in result)
+        assertEquals(true, "https://x.test/articles" in result)
     }
 
     @Test
