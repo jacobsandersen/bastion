@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.41](https://github.com/jacobsandersen/bastion/compare/v1.3.40...v1.3.41) (2026-11-05)
+
+
+### Features
+
+* **webmention:** add Salmention threading for received replies ([#112](https://github.com/jacobsandersen/bastion/issues/112)) ([7721f13](https://github.com/jacobsandersen/bastion/commit/7721f133d4cbe836d56eb85bac258a8789beab53))
+
+
+### Miscellaneous Chores
+
+* add salmention learnings ([#114](https://github.com/jacobsandersen/bastion/issues/114)) ([ec99675](https://github.com/jacobsandersen/bastion/commit/ec996758b6dafb9f4bbcca0d91f86c6f88802b96))
+
 ## [1.3.40](https://github.com/jacobsandersen/bastion/compare/v1.3.39...v1.3.40) (2026-11-03)
 
 
