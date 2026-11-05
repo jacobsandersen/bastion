@@ -50,8 +50,12 @@ When updating this file, preserve this bar for all agents and keep entries conci
   adapter does not merge the document itself.
 - `indieauth` exposes `indieauth::indieauth-token-query` and `indieauth::indieauth-scopes`. `AccessTokenQueryService`
   resolves only tokens for the configured Bastion identity. Token exchange/refresh/revocation commands stay internal.
-- `webmention` exposes only `webmention::webmention-read`. Inbound and outbound commands stay internal. It uses
+- `webmention` exposes `webmention::webmention-read` and `webmention::webmention-events`
+  (`ReceivedWebmentionChangedEvent`). Inbound and outbound commands stay internal. It uses
   `url::ContentUrlMatcher` for own-content checks, not `post::post-url`.
+- `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
+  (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
+- `microsub` has no public surface; see the Microsub section.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
   IndieAuth and Micropub. Everything else is internal. The Micropub multipart filter lives in Micropub, not `config`.
@@ -171,7 +175,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
   `IndieAuthScopeContributor` from `indieauth::indieauth-scopes`; `ScopeCatalog` unions the standard and contributed
   scopes and is the single source for discovery and authorization validation. Micropub contributes its scopes from
   `MicropubTokenScope`. There is no central scope list in config. A module that contributes a scope must enforce it,
-  and new modules should use module-prefixed scope names such as `notes:read`.
+  and new modules should use module-prefixed scope names such as `notes:read`. Exception: Microsub registers the
+  spec's bare `read follow mute block channels`, because reader clients request exactly those.
 - Micropub token validation (`MicropubTokenValidator`) uses `AccessTokenQueryService` from
   `indieauth::indieauth-token-query`; the query service enforces the configured `bastion.indieauth.me`, so Micropub does
   not read that config directly. Token commands stay inside IndieAuth.
@@ -253,3 +258,36 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - Self-webmentions are suppressed: `ContentUrlMatcher.isOwnContentUrl` (host + port match on `bastion.content.base-url`,
   lenient on scheme) filters targets in `WebmentionService.targetUrlsOf` plus a guard in `sendWebmention`, and
   `WebmentionController` rejects sources on the own content domain.
+
+## Microsub
+
+- `/microsub` (`microsub/internal/web/MicrosubController.kt`) is one RPC endpoint dispatched on `action`/`method`.
+  Its own filter chain authenticates via `AccessTokenQueryService`; per-action scope checks happen in the
+  controller. The `me` site must publish `rel="microsub"` by hand, like the IndieAuth metadata link.
+- Single user, persisted with `JdbcClient` (no JPA entities): `microsub_channels`, `microsub_feeds`,
+  `microsub_entries` (jf2 in `data` jsonb, plus derived `author_url`/`categories`/`kinds`/`search` columns), and
+  `microsub_moderation` (null `channel_id` = `global`). `V25` seeds `notifications` and `home`.
+- Entry `source_key` is unique per channel. Feed entries use `feed:<followed feed url>:<uid|url|hash>`, because item
+  ids are only unique within one feed and the URL, unlike the feed row id, survives unfollow and re-follow; webmention
+  entries use `webmention:<id>`. Every upsert sets `last_seen_at`, and retention only purges read or removed entries
+  not seen within the window, so entries still in a feed never come back unread.
+- Feeds are parsed mf2-first (`Mf2FeedParser`), then `rel=alternate` RSS/Atom (Rome; DOCTYPEs rejected) or JSON Feed.
+  `FeedFetcher` follows redirects by hand and checks every hop with `FeedHostValidator` (SSRF); tests override that
+  bean to reach a local server.
+- Fetches run under a claim on the feed row (`claimDue`/`claim`). A refresh requested while a fetch runs sets
+  `refresh_requested_at`, and the release makes the feed due again, so WebSub pings are never lost. The fixed
+  JobRunr jobs are `microsub-feed-poll` and `microsub-entry-retention`.
+- WebSub: `FeedRefreshService.syncSubscription` subscribes to the advertised hub and `self` topic. Subscriptions are
+  shared per (topic, hub), so unsubscribe only when no feed row still references the subscription. A content delivery
+  only triggers a re-fetch; the pushed body is never ingested. Bastion requests leases via
+  `bastion.websub.subscriber.*`, and `websub-subscription-renewal` renews them.
+- Paging: an opaque cursor over `(published desc, id desc)` (`entry/Cursor.kt`). `before` is returned only when
+  items are, and `after` only when more remain. Undated entries keep their first-seen time; future dates are clamped
+  to now.
+- Mutes hide entries at query time; blocks also delete stored entries and drop new ones at ingest. Received
+  webmentions mirror into `notifications` through `ReceivedWebmentionChangedEvent`; the listener reloads state with
+  `WebmentionReadService.receivedById` and deletes the entry once the webmention is gone (missing, rejected, deleted,
+  or a nested copy). A PENDING/ERROR re-verification keeps an existing entry, because settling with unchanged content
+  publishes no event; with no entry yet the listener throws so the resubmission job retries after verification.
+- Jackson 3 `JsonNode.map {}` applies the lambda to the node itself and does not iterate. Use `.toList().map` (or
+  `mapNotNull`/`take`, which are Kotlin iterable extensions) to iterate array elements.

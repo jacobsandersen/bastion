@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.webmention.internal.data.service
 
+import dev.jacobandersen.bastion.webmention.events.ReceivedWebmentionChangedEvent
 import dev.jacobandersen.bastion.webmention.internal.data.domain.NestedResponse
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmention
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionAnalysis
@@ -13,6 +14,7 @@ import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebment
 import dev.jacobandersen.bastion.webmention.internal.data.entity.ReceivedWebmentionEntity
 import dev.jacobandersen.bastion.webmention.internal.data.repository.ReceivedWebmentionRepository
 import dev.jacobandersen.bastion.webmention.internal.service.ReceivedWebmentionAnalyzer
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.security.MessageDigest
@@ -29,6 +31,7 @@ import java.util.UUID
 @Service
 class ReceivedWebmentionService(
     private val repository: ReceivedWebmentionRepository,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     /**
      * Ensure a received webmention exists in [PENDING] state for the given
@@ -115,7 +118,7 @@ class ReceivedWebmentionService(
         saved.displayFingerprint = fingerprint(analysis.copy(nested = shown))
         repository.save(saved)
 
-        return ReceivedWebmentionUpdate(saved.toDomain(), changed = previousFingerprint != saved.displayFingerprint)
+        return announce(ReceivedWebmentionUpdate(saved.toDomain(), changed = previousFingerprint != saved.displayFingerprint))
     }
 
     @Transactional
@@ -143,6 +146,9 @@ class ReceivedWebmentionService(
         sourceUrl: String,
         postId: UUID,
     ): ReceivedWebmention? = repository.findBySourceUrlAndPostId(sourceUrl, postId)?.toDomain()
+
+    @Transactional(readOnly = true)
+    fun find(id: UUID): ReceivedWebmention? = repository.findById(id).map { it.toDomain() }.orElse(null)
 
     @Transactional(readOnly = true)
     fun byPost(postId: UUID): List<ReceivedWebmention> = repository.findByPostId(postId).map { it.toDomain() }
@@ -323,7 +329,18 @@ class ReceivedWebmentionService(
         }
         entity.updatedAtUtc = now
         val saved = repository.save(entity)
-        return ReceivedWebmentionUpdate(saved.toDomain(), changed = previousFingerprint != saved.displayFingerprint)
+        return announce(ReceivedWebmentionUpdate(saved.toDomain(), changed = previousFingerprint != saved.displayFingerprint))
+    }
+
+    /** Publishes a change event for a direct webmention whose displayed state changed, inside the caller's transaction. */
+    private fun announce(update: ReceivedWebmentionUpdate): ReceivedWebmentionUpdate {
+        val webmention = update.webmention
+        if (update.changed && webmention.viaId == null) {
+            eventPublisher.publishEvent(
+                ReceivedWebmentionChangedEvent(UUID.randomUUID(), webmention.id, webmention.postId, Instant.now()),
+            )
+        }
+        return update
     }
 
     /**

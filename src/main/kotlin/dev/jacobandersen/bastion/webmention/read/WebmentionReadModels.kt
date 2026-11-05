@@ -3,6 +3,24 @@ package dev.jacobandersen.bastion.webmention.read
 import java.time.Instant
 import java.util.UUID
 
+/** The current display state of one directly received webmention. */
+sealed interface ReceivedWebmentionLookup {
+    /** Verified and displayed on its post. */
+    data class Displayed(
+        val webmention: WebmentionView,
+    ) : ReceivedWebmentionLookup
+
+    /**
+     * Being re-verified, or its last verification failed transiently. What it
+     * displays is unknown until verification settles, which announces a
+     * change if the display differs.
+     */
+    data object Unsettled : ReceivedWebmentionLookup
+
+    /** Missing, rejected, deleted, or a nested Salmention copy. */
+    data object Gone : ReceivedWebmentionLookup
+}
+
 data class WebmentionView(
     val sourceUrl: String,
     val targetUrl: String,
