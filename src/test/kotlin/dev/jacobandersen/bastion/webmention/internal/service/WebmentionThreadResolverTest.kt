@@ -159,4 +159,23 @@ class WebmentionThreadResolverTest {
         assertNull(threaded.parentOf(carol))
         assertEquals(carol, threaded.parentOf(dave))
     }
+
+    @Test
+    fun `threads a reply to a fragment comment under that comment, else under its page`() {
+        val bobPage = "https://bob.example/post/"
+        val bobEntry = mention(bobPage, listOf(alice), seenAt = 1)
+        val threaded =
+            WebmentionThreadResolver.resolve(
+                listOf(
+                    bobEntry,
+                    mention("$bobPage#comment-12", listOf(bobPage), seenAt = 2, viaId = bobEntry.id),
+                    mention(carol, listOf("https://bob.example/post#comment-12"), seenAt = 3),
+                    mention("https://dave.example/r/1", listOf("$bobPage#comment-99"), seenAt = 4),
+                ),
+            )
+
+        assertEquals("$bobPage#comment-12", threaded.parentOf(carol))
+        assertEquals(bobPage, threaded.parentOf("https://dave.example/r/1"))
+        assertEquals(bobPage, threaded.parentOf("$bobPage#comment-12"))
+    }
 }

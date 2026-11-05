@@ -292,7 +292,7 @@ class ReceivedWebmentionServiceTest {
                 it.id = UUID.randomUUID()
                 it.sourceUrl = carolUrl
             }
-        `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(direct)
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(direct))
 
         service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
 
@@ -368,7 +368,7 @@ class ReceivedWebmentionServiceTest {
                 it.id = UUID.randomUUID()
                 it.sourceUrl = carolUrl
             }
-        `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(direct)
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(direct))
         val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
 
         assertFalse(update.changed)
@@ -385,7 +385,7 @@ class ReceivedWebmentionServiceTest {
                 it.sourceUrl = carolUrl
                 it.viaId = UUID.randomUUID()
             }
-        `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(ownedElsewhere)
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(ownedElsewhere))
 
         val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
 
@@ -435,5 +435,125 @@ class ReceivedWebmentionServiceTest {
         assertEquals(dave.targetUrl, nested.targetUrl)
         verify(repository).save(nested)
         verify(repository, never()).deleteAll(any<List<ReceivedWebmentionEntity>>())
+    }
+
+    private fun savedEntities(): List<ReceivedWebmentionEntity> {
+        val captor = ArgumentCaptor.forClass(ReceivedWebmentionEntity::class.java)
+        verify(repository, atLeastOnce()).save(captor.capture())
+        return captor.allValues
+    }
+
+    @Test
+    fun `a nested copy is hidden behind a direct webmention whose canonical url matches`() {
+        val parent = verifiedParent()
+        val bridgy =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "https://brid.gy/comment/mastodon/carol/123"
+                it.url = "$carolUrl/"
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent, bridgy))
+
+        val withCarol = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol()))).webmention.displayFingerprint
+        val withoutCarol = service.markVerified(sourceUrl, postId, reply("Bob")).webmention.displayFingerprint
+
+        assertTrue(savedEntities().none { it.viaId != null })
+        assertEquals(withoutCarol, withCarol)
+    }
+
+    @Test
+    fun `a nested response owned by another source matches across a trailing slash`() {
+        val parent = verifiedParent()
+        val ownedElsewhere =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "$carolUrl/"
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent, ownedElsewhere))
+
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertTrue(savedEntities().none { it.viaId != null })
+        verify(repository, never()).save(ownedElsewhere)
+    }
+
+    @Test
+    fun `a verified direct webmention takes over a nested copy at its canonical url`() {
+        val direct =
+            entity().also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "https://brid.gy/comment/mastodon/carol/123"
+                `when`(repository.findBySourceUrlAndPostId(it.sourceUrl, postId)).thenReturn(it)
+            }
+        val nestedCopy =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(direct, nestedCopy))
+
+        service.markVerified(
+            direct.sourceUrl,
+            postId,
+            ReceivedWebmentionAnalysis(WebmentionInteraction.REPLY, primary = null, url = carolUrl),
+        )
+
+        verify(repository).deleteAll(listOf(nestedCopy))
+    }
+
+    @Test
+    fun `nested fragment comments on the source page are not hidden behind the source itself`() {
+        val parent = verifiedParent()
+        parent.url = sourceUrl
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent))
+        val comment =
+            NestedResponse(
+                "$sourceUrl#comment-1",
+                ReceivedWebmentionAnalysis(WebmentionInteraction.REPLY, primary = null, url = "$sourceUrl#comment-1"),
+            )
+
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(comment)))
+
+        assertEquals(listOf("$sourceUrl#comment-1"), savedEntities().filter { it.viaId == parent.id }.map { it.sourceUrl }.distinct())
+    }
+
+    @Test
+    fun `markDeleted hands a nested response to a source displaying it under a different trailing slash`() {
+        val parent = verifiedParent()
+        val nested =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                it.viaId = parent.id
+            }
+        val dave =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "https://dave.example/comments/1"
+                it.rawMf2 =
+                    Mf2Object(
+                        type = listOf("h-entry"),
+                        properties =
+                            mapOf(
+                                "comment" to
+                                    listOf(
+                                        Mf2Value.Object(
+                                            Mf2Object(
+                                                type = listOf("h-cite"),
+                                                properties = mapOf("url" to listOf(Mf2Value.String("$carolUrl/"))),
+                                            ),
+                                        ),
+                                    ),
+                            ),
+                    )
+            }
+        `when`(repository.findByViaId(requireNotNull(parent.id))).thenReturn(listOf(nested))
+        `when`(repository.findByPostIdAndState(postId, ReceivedWebmentionState.VERIFIED)).thenReturn(listOf(parent, dave))
+
+        service.markDeleted(sourceUrl, postId)
+
+        assertEquals(dave.id, nested.viaId)
     }
 }

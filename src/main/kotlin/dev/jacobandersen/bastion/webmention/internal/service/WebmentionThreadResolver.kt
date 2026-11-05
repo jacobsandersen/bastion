@@ -17,7 +17,8 @@ data class ThreadedWebmention(
  * that arrive before their parent still thread once the parent is known.
  *
  * A response's parent is the first other response whose source URL or
- * canonical URL appears in its `in-reply-to`. A nested response that names no
+ * canonical URL appears in its `in-reply-to`, matched on the exact URL first
+ * and then on its page without the fragment. A nested response that names no
  * known parent falls back to the source that displays it. Nested responses
  * whose displaying source is not shown are hidden, and a reply cycle is broken
  * at its oldest member, which becomes a top-level response; responses that
@@ -33,10 +34,12 @@ object WebmentionThreadResolver {
             visible.associate { it.id to (it.inReplyTo ?: it.rawMf2?.let(ReceivedWebmentionAnalyzer::inReplyToOf).orEmpty()) }
 
         val byKey = mutableMapOf<String, ReceivedWebmention>()
+        val byPage = mutableMapOf<String, ReceivedWebmention>()
         visible.forEach { mention ->
-            listOfNotNull(mention.sourceUrl, urlOf[mention.id])
-                .map(ReceivedWebmentionAnalyzer::normalizeUrl)
-                .forEach { key -> byKey.putIfAbsent(key, mention) }
+            listOfNotNull(mention.sourceUrl, urlOf[mention.id]).forEach { url ->
+                byKey.putIfAbsent(ReceivedWebmentionAnalyzer.urlKey(url), mention)
+                byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
+            }
         }
 
         val parentOf = mutableMapOf<UUID, ReceivedWebmention?>()
@@ -45,7 +48,8 @@ object WebmentionThreadResolver {
                 inReplyToOf
                     .getValue(mention.id)
                     .firstNotNullOfOrNull { url ->
-                        byKey[ReceivedWebmentionAnalyzer.normalizeUrl(url)]?.takeIf { it.id != mention.id }
+                        (byKey[ReceivedWebmentionAnalyzer.urlKey(url)] ?: byPage[ReceivedWebmentionAnalyzer.normalizeUrl(url)])
+                            ?.takeIf { it.id != mention.id }
                     }
             parentOf[mention.id] = explicit ?: mention.viaId?.let(byId::get)
         }

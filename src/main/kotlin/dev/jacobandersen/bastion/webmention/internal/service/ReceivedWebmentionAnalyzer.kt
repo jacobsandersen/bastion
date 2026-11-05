@@ -86,7 +86,7 @@ object ReceivedWebmentionAnalyzer {
         exclude: (String) -> Boolean,
     ): List<NestedResponse> {
         val primaryUrl = canonicalUrl(primary)
-        val seen = listOfNotNull(sourceUrl, primaryUrl).map(::normalizeUrl).toMutableSet()
+        val seen = listOfNotNull(sourceUrl, primaryUrl).map(::urlKey).toMutableSet()
         val nested = mutableListOf<NestedResponse>()
         collectNested(primary, primaryUrl ?: sourceUrl, 1, seen, exclude, nested)
         return nested
@@ -111,7 +111,17 @@ object ReceivedWebmentionAnalyzer {
             .filter(String::isNotEmpty)
             .distinct()
 
-    /** A URL normalized for matching: no fragment and no trailing slash. */
+    /**
+     * A URL keyed for identifying one response: no trailing slash, but the
+     * fragment is kept, so `#comment-N` permalinks stay distinct.
+     */
+    fun urlKey(url: String): String {
+        val trimmed = url.trim()
+        val page = trimmed.substringBefore('#').trimEnd('/')
+        return if ('#' in trimmed) "$page#${trimmed.substringAfter('#')}" else page
+    }
+
+    /** A URL normalized to its page: no fragment and no trailing slash. */
     fun normalizeUrl(url: String): String = url.trim().substringBefore('#').trimEnd('/')
 
     private fun analyzeObject(
@@ -156,7 +166,7 @@ object ReceivedWebmentionAnalyzer {
                 collectNested(candidate, containerUrl, depth + 1, seen, exclude, out)
                 continue
             }
-            if (exclude(url) || !seen.add(normalizeUrl(url))) continue
+            if (exclude(url) || !seen.add(urlKey(url))) continue
 
             // A displayed comment with no explicit response property is a reply to what contains it.
             val analysis = analyzeObject(candidate, classifyProperties(candidate) ?: REPLY)
@@ -186,7 +196,7 @@ object ReceivedWebmentionAnalyzer {
         val children =
             container.children.orEmpty().filter { child ->
                 child.type.any { it in nestedTypes } &&
-                    canonicalUrl(child)?.let { normalizeUrl(it) in contextUrls } != true
+                    canonicalUrl(child)?.let { urlKey(it) in contextUrls } != true
             }
         return comments + children
     }
@@ -200,7 +210,7 @@ object ReceivedWebmentionAnalyzer {
                         else -> value.plainTextOrNull
                     }
                 }
-            }.map(::normalizeUrl)
+            }.map(::urlKey)
             .toSet()
 
     /**

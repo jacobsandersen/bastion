@@ -101,6 +101,10 @@ class ReceivedWebmentionService(
         entity.verifiedAt = now
         entity.updatedAtUtc = now
         val saved = repository.save(entity)
+        saved.url?.let { url ->
+            val copies = matching(repository.findByPostId(postId), url).filter { it.viaId != null && it.id != saved.id }
+            if (copies.isNotEmpty()) repository.deleteAll(copies)
+        }
 
         val shown = replaceNested(saved, analysis.nested, now)
         saved.displayFingerprint = fingerprint(analysis.copy(nested = shown))
@@ -147,7 +151,8 @@ class ReceivedWebmentionService(
 
     /**
      * Upserts the nested responses displayed by [via] and releases the ones it
-     * no longer displays. A response with a direct webmention is hidden behind
+     * no longer displays. Rows are matched on source URL or canonical URL. A
+     * response with a direct webmention is hidden behind
      * it and left alone; one already owned by another displaying source stays
      * with that source. Returns the nested responses the post actually shows
      * through [via], which is what its fingerprint covers.
@@ -160,10 +165,12 @@ class ReceivedWebmentionService(
         val viaId = requireNotNull(via.id)
         val owned = mutableSetOf<UUID>()
         val shown = mutableListOf<NestedResponse>()
+        val onPost = repository.findByPostId(via.postId)
 
         nested.forEach { response ->
-            val existing = repository.findBySourceUrlAndPostId(response.url, via.postId)
-            if (existing != null && existing.viaId == null) return@forEach
+            val matches = matching(onPost, response.url)
+            if (matches.any { it.viaId == null }) return@forEach
+            val existing = matches.firstOrNull { it.viaId == viaId } ?: matches.firstOrNull()
             shown += response
             if (existing != null && existing.viaId != viaId) return@forEach
 
@@ -224,7 +231,7 @@ class ReceivedWebmentionService(
                     val displayed =
                         ReceivedWebmentionAnalyzer
                             .nestedResponses(requireNotNull(candidate.rawMf2), candidate.sourceUrl) { false }
-                            .map { ReceivedWebmentionAnalyzer.normalizeUrl(it.url) }
+                            .map { ReceivedWebmentionAnalyzer.urlKey(it.url) }
                             .toSet()
                     candidate to displayed
                 }
@@ -232,8 +239,8 @@ class ReceivedWebmentionService(
 
         val orphans =
             rows.filter { row ->
-                val key = ReceivedWebmentionAnalyzer.normalizeUrl(row.sourceUrl)
-                val heir = heirs.firstOrNull { (_, displayed) -> key in displayed }?.first
+                val keys = keysOf(row)
+                val heir = heirs.firstOrNull { (_, displayed) -> keys.any { it in displayed } }?.first
                 if (heir != null) {
                     row.viaId = heir.id
                     row.targetUrl = heir.targetUrl
@@ -244,6 +251,18 @@ class ReceivedWebmentionService(
             }
         if (orphans.isNotEmpty()) repository.deleteAll(orphans)
     }
+
+    /** The rows among [rows] that are the response at [url], by source URL or canonical URL. */
+    private fun matching(
+        rows: List<ReceivedWebmentionEntity>,
+        url: String,
+    ): List<ReceivedWebmentionEntity> {
+        val key = ReceivedWebmentionAnalyzer.urlKey(url)
+        return rows.filter { key in keysOf(it) }
+    }
+
+    private fun keysOf(row: ReceivedWebmentionEntity): Set<String> =
+        listOfNotNull(row.sourceUrl, row.url).map(ReceivedWebmentionAnalyzer::urlKey).toSet()
 
     private fun applyAnalysis(
         entity: ReceivedWebmentionEntity,
@@ -288,7 +307,6 @@ class ReceivedWebmentionService(
             entity.contentText = null
             entity.contentHtml = null
             entity.rawMf2 = null
-            entity.url = null
             entity.inReplyTo = null
         }
         entity.updatedAtUtc = now

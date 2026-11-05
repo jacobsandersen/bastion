@@ -300,4 +300,33 @@ class ReceivedWebmentionAnalyzerTest {
 
         assertEquals(listOf("https://carol.example/1"), analysis.nested.map { it.url })
     }
+
+    @Test
+    fun `keeps natively hosted fragment comments as distinct responses`() {
+        val analysis =
+            ReceivedWebmentionAnalyzer.analyze(
+                Mf2ParserImpl().parse(
+                    """
+                    <article class="h-entry">
+                      <a class="u-url" href="https://bob.example/post/">permalink</a>
+                      <div class="p-comment h-cite">
+                        <a class="u-url" href="https://bob.example/post/#comment-1">#</a>
+                        <p class="p-content">first</p>
+                      </div>
+                      <div class="p-comment h-cite">
+                        <a class="u-url" href="https://bob.example/post/#comment-2">#</a>
+                        <p class="p-content">second</p>
+                      </div>
+                    </article>
+                    """.trimIndent(),
+                    "https://bob.example/post/",
+                ),
+                sourceUrl = "https://bob.example/post/",
+            )
+
+        assertEquals(
+            listOf("https://bob.example/post/#comment-1", "https://bob.example/post/#comment-2"),
+            analysis.nested.map { it.url },
+        )
+    }
 }
