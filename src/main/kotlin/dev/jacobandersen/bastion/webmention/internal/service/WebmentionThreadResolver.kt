@@ -41,6 +41,7 @@ object WebmentionThreadResolver {
 
         val byKey = mutableMapOf<String, ReceivedWebmention>()
         val byPage = mutableMapOf<String, ReceivedWebmention>()
+
         fun index(
             mention: ReceivedWebmention,
             url: String,

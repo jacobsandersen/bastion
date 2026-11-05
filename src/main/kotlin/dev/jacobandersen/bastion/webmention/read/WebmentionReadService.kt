@@ -1,12 +1,12 @@
 package dev.jacobandersen.bastion.webmention.read
 
+import dev.jacobandersen.bastion.url.ContentUrlMatcher
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmention
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.service.ReceivedWebmentionService
 import dev.jacobandersen.bastion.webmention.internal.service.ReceivedWebmentionAnalyzer
 import dev.jacobandersen.bastion.webmention.internal.service.ThreadedWebmention
 import dev.jacobandersen.bastion.webmention.internal.service.WebmentionThreadResolver
-import dev.jacobandersen.bastion.url.ContentUrlMatcher
 import org.springframework.stereotype.Service
 import java.util.UUID
 
@@ -16,11 +16,9 @@ class WebmentionReadService(
     private val contentUrlMatcher: ContentUrlMatcher,
 ) {
     /** Verified webmentions for a post, oldest first, each with its place in the reply thread. */
-    fun verifiedByPost(postId: UUID): List<WebmentionView> =
-        resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
+    fun verifiedByPost(postId: UUID): List<WebmentionView> = resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
 
-    fun countsForPost(postId: UUID): WebmentionCountsView =
-        countsOf(resolve(receivedWebmentionService.verifiedByPost(postId)))
+    fun countsForPost(postId: UUID): WebmentionCountsView = countsOf(resolve(receivedWebmentionService.verifiedByPost(postId)))
 
     fun countsByPostIds(postIds: Collection<UUID>): Map<UUID, WebmentionCountsView> = byPostIds(postIds).mapValues { it.value.counts }
 
