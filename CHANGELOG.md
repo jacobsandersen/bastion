@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.42](https://github.com/jacobsandersen/bastion/compare/v1.3.41...v1.3.42) (2026-11-05)
+
+
+### Features
+
+* Add microsub support ([#115](https://github.com/jacobsandersen/bastion/issues/115)) ([59c3182](https://github.com/jacobsandersen/bastion/commit/59c3182e7d3608f2aeaeaf549f2b713a8d290a8d))
+
 ## [1.3.41](https://github.com/jacobsandersen/bastion/compare/v1.3.40...v1.3.41) (2026-11-05)
 
 
