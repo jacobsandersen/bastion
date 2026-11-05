@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.43](https://github.com/jacobsandersen/bastion/compare/v1.3.42...v1.3.43) (2026-11-05)
+
+
+### Bug Fixes
+
+* diversify websub topic urls from single support to supporting various topics ([#117](https://github.com/jacobsandersen/bastion/issues/117)) ([dac91c8](https://github.com/jacobsandersen/bastion/commit/dac91c83751f1470e98bd2103472c46b4eb6bcc1))
+* **websub:** add ability to pluralize type names for feeds ([#119](https://github.com/jacobsandersen/bastion/issues/119)) ([8520c41](https://github.com/jacobsandersen/bastion/commit/8520c418f78933902a0e4d0704be4a0d43a427b3))
+
 ## [1.3.42](https://github.com/jacobsandersen/bastion/compare/v1.3.41...v1.3.42) (2026-11-05)
 
 
