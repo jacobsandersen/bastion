@@ -11,6 +11,7 @@ import dev.jacobandersen.bastion.microsub.internal.jf2.Jf2Item
 import dev.jacobandersen.bastion.microsub.internal.jf2.jf2
 import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationRepository
 import dev.jacobandersen.bastion.webmention.events.ReceivedWebmentionChangedEvent
+import dev.jacobandersen.bastion.webmention.read.ReceivedWebmentionLookup
 import dev.jacobandersen.bastion.webmention.read.WebmentionReadService
 import dev.jacobandersen.bastion.webmention.read.WebmentionView
 import dev.jacobandersen.bastion.websub.events.WebsubContentNotifiedEvent
@@ -39,7 +40,8 @@ class WebsubContentListener(
 /**
  * Mirrors directly received webmentions into the `notifications` channel.
  * Loads the latest state rather than trusting the event, so a webmention that
- * is no longer verified is removed and replays converge.
+ * is gone is removed and replays converge. A webmention still being
+ * re-verified keeps its entry; settling announces any display change.
  */
 @Component
 class WebmentionNotificationListener(
@@ -53,8 +55,12 @@ class WebmentionNotificationListener(
     fun on(event: ReceivedWebmentionChangedEvent) {
         val channel = channels.findByUid(ChannelService.NOTIFICATIONS) ?: return
         val key = sourceKey(event.webmentionId)
-        val view = webmentions.receivedById(event.webmentionId)
-        val item = view?.let(::toItem)
+        val item =
+            when (val lookup = webmentions.receivedById(event.webmentionId)) {
+                is ReceivedWebmentionLookup.Displayed -> toItem(lookup.webmention)
+                ReceivedWebmentionLookup.Unsettled -> return
+                ReceivedWebmentionLookup.Gone -> null
+            }
         if (item == null || (item.authorUrl != null && moderation.isBlocked(channel.id, item.authorUrl))) {
             entries.deleteBySourceKey(channel.id, key)
             return

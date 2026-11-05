@@ -8,6 +8,7 @@ import dev.jacobandersen.bastion.microsub.internal.feed.FeedRefreshService
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedHostValidator
 import dev.jacobandersen.bastion.microsub.internal.job.EntryRetentionService
 import dev.jacobandersen.bastion.webmention.events.ReceivedWebmentionChangedEvent
+import dev.jacobandersen.bastion.webmention.read.ReceivedWebmentionLookup
 import dev.jacobandersen.bastion.webmention.read.WebmentionReadService
 import dev.jacobandersen.bastion.webmention.read.WebmentionView
 import org.awaitility.Awaitility.await
@@ -583,7 +584,7 @@ class MicrosubIntegrationTest {
                 parentSourceUrl = null,
                 viaSourceUrl = null,
             )
-        whenever(webmentions.receivedById(webmentionId)).thenReturn(view)
+        whenever(webmentions.receivedById(webmentionId)).thenReturn(ReceivedWebmentionLookup.Displayed(view))
         publish(webmentionId)
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
@@ -597,7 +598,18 @@ class MicrosubIntegrationTest {
             assertFalse(item["_is_read"].asBoolean())
         }
 
-        whenever(webmentions.receivedById(webmentionId)).thenReturn(null)
+        whenever(webmentions.receivedById(webmentionId)).thenReturn(ReceivedWebmentionLookup.Unsettled)
+        publish(webmentionId)
+        await().atMost(Duration.ofSeconds(10)).untilAsserted {
+            assertEquals(0, pendingPublications(webmentionId), "the re-verification event was handled")
+        }
+        val kept =
+            json(
+                mockMvc.perform(get("/microsub").auth().param("action", "timeline").param("channel", "notifications")),
+            )["items"]
+        assertTrue(kept.any { it["url"]?.asString() == source }, "a webmention being re-verified keeps its notification")
+
+        whenever(webmentions.receivedById(webmentionId)).thenReturn(ReceivedWebmentionLookup.Gone)
         publish(webmentionId)
         await().atMost(Duration.ofSeconds(10)).untilAsserted {
             val items =
@@ -607,6 +619,13 @@ class MicrosubIntegrationTest {
             assertTrue(items.none { it["url"]?.asString() == source })
         }
     }
+
+    private fun pendingPublications(webmentionId: UUID): Int =
+        jdbc
+            .sql("select count(*) from event_publication where serialized_event like :id")
+            .param("id", "%$webmentionId%")
+            .query(Int::class.java)
+            .single()
 
     private fun publish(webmentionId: UUID) {
         transactions.executeWithoutResult {

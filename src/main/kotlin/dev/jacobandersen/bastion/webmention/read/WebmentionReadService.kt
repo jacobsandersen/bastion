@@ -19,17 +19,26 @@ class WebmentionReadService(
     /** Verified webmentions for a post, oldest first, each with its place in the reply thread. */
     fun verifiedByPost(postId: UUID): List<WebmentionView> = resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
 
-    /**
-     * A directly received webmention by id, threaded within its post, or null
-     * when it does not exist, is not (or no longer) verified, or is a nested
-     * Salmention copy.
-     */
-    fun receivedById(id: UUID): WebmentionView? {
-        val mention = receivedWebmentionService.find(id) ?: return null
-        if (mention.viaId != null || mention.state != ReceivedWebmentionState.VERIFIED) return null
-        return resolve(receivedWebmentionService.verifiedByPost(mention.postId))
-            .firstOrNull { it.mention.id == id }
-            ?.let(::toView)
+    /** The display state of a directly received webmention by id, threaded within its post when displayed. */
+    fun receivedById(id: UUID): ReceivedWebmentionLookup {
+        val mention = receivedWebmentionService.find(id) ?: return ReceivedWebmentionLookup.Gone
+        if (mention.viaId != null) return ReceivedWebmentionLookup.Gone
+        return when (mention.state) {
+            ReceivedWebmentionState.PENDING, ReceivedWebmentionState.ERROR -> {
+                ReceivedWebmentionLookup.Unsettled
+            }
+
+            ReceivedWebmentionState.REJECTED, ReceivedWebmentionState.DELETED -> {
+                ReceivedWebmentionLookup.Gone
+            }
+
+            ReceivedWebmentionState.VERIFIED -> {
+                resolve(receivedWebmentionService.verifiedByPost(mention.postId))
+                    .firstOrNull { it.mention.id == id }
+                    ?.let { ReceivedWebmentionLookup.Displayed(toView(it)) }
+                    ?: ReceivedWebmentionLookup.Gone
+            }
+        }
     }
 
     fun countsForPost(postId: UUID): WebmentionCountsView = countsOf(resolve(receivedWebmentionService.verifiedByPost(postId)))
