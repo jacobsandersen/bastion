@@ -19,43 +19,36 @@ class WebsubPublisherTest {
     private val jobScheduler = mock(JobScheduler::class.java)
     private val httpClient = mock(WebsubHttpClient::class.java)
 
-    private val topic = "https://bastion.test/feed.xml"
+    private val topic = "https://bastion.test/feed"
+    private val topics = listOf(topic, "https://bastion.test/tags/kotlin")
     private val hubs = listOf("https://hub-a.example/", "https://hub-b.example/")
 
-    private fun publisher(
-        hubs: List<String>,
-        topicUrl: String = topic,
-    ): WebsubPublisher =
-        WebsubPublisher(
-            jobScheduler,
-            httpClient,
-            WebsubConfig(hubs = hubs, topicUrl = topicUrl),
-        )
+    private fun publisher(hubs: List<String>): WebsubPublisher = WebsubPublisher(jobScheduler, httpClient, WebsubConfig(hubs = hubs))
 
     @Test
-    fun `publish enqueues a job per configured hub`() {
-        publisher(hubs).publish()
+    fun `publish enqueues a job per hub and topic`() {
+        publisher(hubs).publish(topics)
 
-        verify(jobScheduler, times(2)).enqueue(any())
+        verify(jobScheduler, times(4)).enqueue(any())
     }
 
     @Test
     fun `publish does nothing when no hubs are configured`() {
-        publisher(emptyList()).publish()
+        publisher(emptyList()).publish(topics)
 
         verify(jobScheduler, never()).enqueue(any())
     }
 
     @Test
-    fun `publish does nothing when the topic url is blank`() {
-        publisher(hubs, topicUrl = "").publish()
+    fun `publish does nothing when there are no topics`() {
+        publisher(hubs).publish(emptyList())
 
         verify(jobScheduler, never()).enqueue(any())
     }
 
     @Test
     fun `publish ignores blank hub entries`() {
-        publisher(listOf("https://hub-a.example/", "   ", "")).publish()
+        publisher(listOf("https://hub-a.example/", "   ", "")).publish(listOf(topic))
 
         verify(jobScheduler, times(1)).enqueue(any())
     }
@@ -64,14 +57,14 @@ class WebsubPublisherTest {
     fun `publishToHub posts the configured topic to the hub`() {
         `when`(httpClient.publish("https://hub-a.example/", topic)).thenReturn(PublishResult.Success(204))
 
-        publisher(hubs).publishToHub("https://hub-a.example/")
+        publisher(hubs).publishToHub("https://hub-a.example/", topic)
 
         verify(httpClient, times(1)).publish("https://hub-a.example/", topic)
     }
 
     @Test
     fun `publishToHub skips blocked hubs`() {
-        publisher(hubs).publishToHub("http://127.0.0.1/hub")
+        publisher(hubs).publishToHub("http://127.0.0.1/hub", topic)
 
         verify(httpClient, never()).publish(any(), any())
     }
@@ -82,7 +75,7 @@ class WebsubPublisherTest {
             .thenReturn(PublishResult.Failure(503, "HTTP 503", retryable = true))
 
         assertThrows(WebsubPublishException::class.java) {
-            publisher(hubs).publishToHub("https://hub-a.example/")
+            publisher(hubs).publishToHub("https://hub-a.example/", topic)
         }
     }
 
@@ -91,6 +84,6 @@ class WebsubPublisherTest {
         `when`(httpClient.publish("https://hub-a.example/", topic))
             .thenReturn(PublishResult.Failure(400, "HTTP 400", retryable = false))
 
-        assertDoesNotThrow { publisher(hubs).publishToHub("https://hub-a.example/") }
+        assertDoesNotThrow { publisher(hubs).publishToHub("https://hub-a.example/", topic) }
     }
 }

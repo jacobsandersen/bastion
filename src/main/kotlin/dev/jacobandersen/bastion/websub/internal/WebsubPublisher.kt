@@ -15,10 +15,10 @@ class WebsubPublishException(
 ) : RuntimeException(message)
 
 /**
- * Publishes the configured topic to each configured WebSub hub.
+ * Publishes feed topics to each configured WebSub hub.
  *
- * Dispatch is fire-and-forget: [publish] enqueues one JobRunr job per hub,
- * and JobRunr's exponential backoff retries any job that fails with a
+ * Dispatch is fire-and-forget: [publish] enqueues one JobRunr job per hub
+ * and topic, and JobRunr's exponential backoff retries any job that fails with a
  * retryable error.
  */
 @Service
@@ -30,26 +30,26 @@ class WebsubPublisher(
     private val hubs: List<String>
         get() = config.hubs.map(String::trim).filter(String::isNotBlank)
 
-    private val enabled: Boolean
-        get() = hubs.isNotEmpty() && config.topicUrl.isNotBlank()
-
-    fun publish() {
-        if (!enabled) {
-            logger.debug { "WebSub publishing disabled (no hubs or topic URL configured)" }
+    fun publish(topicUrls: Collection<String>) {
+        if (hubs.isEmpty() || topicUrls.isEmpty()) {
+            logger.debug { "WebSub publishing skipped (no hubs or topics)" }
             return
         }
 
-        hubs.forEach { hub -> enqueuePublish(hub) }
+        hubs.forEach { hub -> topicUrls.forEach { topic -> enqueuePublish(hub, topic) } }
     }
 
-    fun publishToHub(hubUrl: String) {
+    fun publishToHub(
+        hubUrl: String,
+        topicUrl: String,
+    ) {
         if (HttpUtil.isBlockedHost(hubUrl, failClosedOnDnsError = false)) {
             logger.warn { "Skipping publish to blocked hub $hubUrl" }
             return
         }
 
-        logger.info { "Publishing WebSub topic ${config.topicUrl} to $hubUrl..." }
-        when (val result = httpClient.publish(hubUrl, config.topicUrl)) {
+        logger.info { "Publishing WebSub topic $topicUrl to $hubUrl..." }
+        when (val result = httpClient.publish(hubUrl, topicUrl)) {
             is PublishResult.Success -> {
                 logger.info { "WebSub publish delivered to $hubUrl (HTTP ${result.statusCode})" }
             }
@@ -63,7 +63,10 @@ class WebsubPublisher(
         }
     }
 
-    private fun enqueuePublish(hubUrl: String) {
-        jobScheduler.enqueue { publishToHub(hubUrl) }
+    private fun enqueuePublish(
+        hubUrl: String,
+        topicUrl: String,
+    ) {
+        jobScheduler.enqueue { publishToHub(hubUrl, topicUrl) }
     }
 }

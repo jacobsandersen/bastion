@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito.after
 import org.mockito.Mockito.timeout
 import org.mockito.Mockito.verify
+import org.mockito.kotlin.any
 import org.mockito.kotlin.clearInvocations
 import org.mockito.kotlin.reset
 import org.mockito.kotlin.whenever
@@ -110,18 +111,18 @@ class PostWebsubListenerIntegrationTest {
     fun createPublishesForPublicPosts() {
         createPublicPost("Hello WebSub")
 
-        verify(websubPublisher, timeout(2_000)).publish()
+        verify(websubPublisher, timeout(2_000)).publish(any())
     }
 
     @Test
     fun createDoesNotPublishForDraftOrPrivatePosts() {
         val draftSlug = uniqueSlug("websub-draft")
         createService.create(createPayload("Draft", draftSlug, status = "draft"), null)
-        verify(websubPublisher, after(1_000).never()).publish()
+        verify(websubPublisher, after(1_000).never()).publish(any())
 
         val privateSlug = uniqueSlug("websub-private")
         createService.create(createPayload("Private", privateSlug, visibility = "private"), null)
-        verify(websubPublisher, after(1_000).never()).publish()
+        verify(websubPublisher, after(1_000).never()).publish(any())
     }
 
     @Test
@@ -133,7 +134,7 @@ class PostWebsubListenerIntegrationTest {
         val response = updateService.update(updateJson(location, """"replace": {"content": ["After"]}"""))
         assertInstanceOf(ApiResponse.Success.NoContent::class.java, response)
 
-        verify(websubPublisher, timeout(2_000)).publish()
+        verify(websubPublisher, timeout(2_000)).publish(any())
     }
 
     @Test
@@ -145,7 +146,7 @@ class PostWebsubListenerIntegrationTest {
         val response = updateService.update(updateJson(location, """"replace": {"visibility": ["private"]}"""))
         assertInstanceOf(ApiResponse.Success.NoContent::class.java, response)
 
-        verify(websubPublisher, timeout(2_000)).publish()
+        verify(websubPublisher, timeout(2_000)).publish(any())
     }
 
     @Test
@@ -161,12 +162,12 @@ class PostWebsubListenerIntegrationTest {
             deleteService.undelete(MicropubPayload.Json(mapper.createObjectNode().put("url", location)))
         assertInstanceOf(ApiResponse.Success.NoContent::class.java, undeleteResponse)
 
-        verify(websubPublisher, timeout(2_000).times(2)).publish()
+        verify(websubPublisher, timeout(2_000).times(2)).publish(any())
     }
 
     @Test
     fun failedListenerPublicationsAreRetried() {
-        whenever(websubPublisher.publish()).thenThrow(RuntimeException("hub unavailable"))
+        whenever(websubPublisher.publish(any())).thenThrow(RuntimeException("hub unavailable"))
 
         createPublicPost("Retry WebSub")
 
@@ -177,7 +178,7 @@ class PostWebsubListenerIntegrationTest {
         reset(websubPublisher)
         resubmissionService.resubmit(Duration.ZERO)
 
-        verify(websubPublisher, timeout(2_000)).publish()
+        verify(websubPublisher, timeout(2_000)).publish(any())
         awaitNoInFlightEvents()
         assertEquals(0, failedEventCount())
     }
