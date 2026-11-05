@@ -556,4 +556,91 @@ class ReceivedWebmentionServiceTest {
 
         assertEquals(dave.id, nested.viaId)
     }
+
+    private fun daveDisplaying(url: String) =
+        entity(state = ReceivedWebmentionState.VERIFIED).also {
+            it.id = UUID.randomUUID()
+            it.sourceUrl = "https://dave.example/comments/1"
+            it.rawMf2 =
+                Mf2Object(
+                    type = listOf("h-entry"),
+                    properties =
+                        mapOf(
+                            "comment" to
+                                listOf(
+                                    Mf2Value.Object(
+                                        Mf2Object(
+                                            type = listOf("h-cite"),
+                                            properties = mapOf("url" to listOf(Mf2Value.String(url))),
+                                        ),
+                                    ),
+                                ),
+                        ),
+                )
+        }
+
+    @Test
+    fun `ensurePending takes over a nested copy stored under a different trailing slash`() {
+        val nestedCopy =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "$carolUrl/"
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(nestedCopy))
+
+        val result = service.ensurePending(carolUrl, targetUrl, postId)
+
+        assertEquals(nestedCopy.id, result.id)
+        assertNull(nestedCopy.viaId)
+        assertEquals(carolUrl, nestedCopy.sourceUrl)
+        assertEquals(ReceivedWebmentionState.PENDING, nestedCopy.state)
+        assertTrue(savedEntities().all { it === nestedCopy })
+    }
+
+    @Test
+    fun `a verified direct webmention without a u-url takes over a nested copy at its source url`() {
+        val direct =
+            entity().also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(it)
+            }
+        val nestedCopy =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "$carolUrl/"
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(direct, nestedCopy))
+
+        service.markVerified(carolUrl, postId, ReceivedWebmentionAnalysis(WebmentionInteraction.REPLY, primary = null))
+
+        verify(repository).deleteAll(listOf(nestedCopy))
+    }
+
+    @Test
+    fun `a released nested copy hidden behind a direct webmention is deleted, not handed on`() {
+        val parent = verifiedParent()
+        val stale =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "$carolUrl/"
+                it.viaId = parent.id
+            }
+        val direct =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+            }
+        val dave = daveDisplaying(carolUrl)
+        `when`(repository.findByViaId(requireNotNull(parent.id))).thenReturn(listOf(stale))
+        `when`(repository.findByPostId(postId)).thenReturn(listOf(parent, stale, direct, dave))
+        `when`(repository.findByPostIdAndState(postId, ReceivedWebmentionState.VERIFIED)).thenReturn(listOf(parent, direct, dave))
+
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertEquals(parent.id, stale.viaId)
+        verify(repository).deleteAll(listOf(stale))
+    }
 }

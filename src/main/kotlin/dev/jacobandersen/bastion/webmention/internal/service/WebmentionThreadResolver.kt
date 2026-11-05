@@ -38,7 +38,7 @@ object WebmentionThreadResolver {
         visible.forEach { mention ->
             listOfNotNull(mention.sourceUrl, urlOf[mention.id]).forEach { url ->
                 byKey.putIfAbsent(ReceivedWebmentionAnalyzer.urlKey(url), mention)
-                byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
+                if ('#' !in url) byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
             }
         }
 

@@ -43,7 +43,9 @@ class ReceivedWebmentionService(
         postId: UUID,
     ): ReceivedWebmention {
         val now = Instant.now()
-        val existing = repository.findBySourceUrlAndPostId(sourceUrl, postId)
+        val existing =
+            repository.findBySourceUrlAndPostId(sourceUrl, postId)
+                ?: matching(repository.findByPostId(postId), sourceUrl).firstOrNull { it.viaId != null }
         if (existing == null) {
             val created =
                 ReceivedWebmentionEntity(
@@ -69,6 +71,7 @@ class ReceivedWebmentionService(
         if (existing.state != PENDING || existing.viaId != null) {
             existing.state = PENDING
             existing.viaId = null
+            existing.sourceUrl = sourceUrl
             existing.targetUrl = targetUrl
             existing.lastError = null
             existing.verifiedAt = null
@@ -101,10 +104,12 @@ class ReceivedWebmentionService(
         entity.verifiedAt = now
         entity.updatedAtUtc = now
         val saved = repository.save(entity)
-        saved.url?.let { url ->
-            val copies = matching(repository.findByPostId(postId), url).filter { it.viaId != null && it.id != saved.id }
-            if (copies.isNotEmpty()) repository.deleteAll(copies)
-        }
+        val keys = keysOf(saved)
+        val copies =
+            repository.findByPostId(postId).filter { row ->
+                row.viaId != null && row.id != saved.id && keysOf(row).any { it in keys }
+            }
+        if (copies.isNotEmpty()) repository.deleteAll(copies)
 
         val shown = replaceNested(saved, analysis.nested, now)
         saved.displayFingerprint = fingerprint(analysis.copy(nested = shown))
@@ -211,9 +216,9 @@ class ReceivedWebmentionService(
 
     /**
      * Releases nested rows whose owning source [formerOwnerId] no longer
-     * displays them. A row another verified source on the post still displays
-     * (per its stored microformats) moves to that source; the rest are
-     * deleted. This keeps a response two sources display from disappearing
+     * displays them. A row hidden behind a direct webmention is deleted. A row
+     * another verified source on the post still displays (per its stored
+     * microformats) moves to that source; the rest are deleted. This keeps a response two sources display from disappearing
      * when only one of them drops it.
      */
     private fun releaseNested(
@@ -223,6 +228,12 @@ class ReceivedWebmentionService(
     ) {
         if (rows.isEmpty()) return
 
+        val directKeys =
+            repository
+                .findByPostId(rows.first().postId)
+                .filter { it.viaId == null }
+                .flatMap(::keysOf)
+                .toSet()
         val heirs by lazy {
             repository
                 .findByPostIdAndState(rows.first().postId, VERIFIED)
@@ -240,6 +251,7 @@ class ReceivedWebmentionService(
         val orphans =
             rows.filter { row ->
                 val keys = keysOf(row)
+                if (keys.any { it in directKeys }) return@filter true
                 val heir = heirs.firstOrNull { (_, displayed) -> keys.any { it in displayed } }?.first
                 if (heir != null) {
                     row.viaId = heir.id

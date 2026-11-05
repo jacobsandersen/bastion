@@ -178,4 +178,22 @@ class WebmentionThreadResolverTest {
         assertEquals(bobPage, threaded.parentOf("https://dave.example/r/1"))
         assertEquals(bobPage, threaded.parentOf("$bobPage#comment-12"))
     }
+
+    @Test
+    fun `an unknown fragment falls back to its page, not to a sibling fragment comment`() {
+        val eve = mention("https://eve.example/p/1", listOf(alice), seenAt = 1)
+        val comment1 = "https://bob.example/post#comment-1"
+        val dave = "https://dave.example/r/1"
+        val threaded =
+            WebmentionThreadResolver.resolve(
+                listOf(
+                    eve,
+                    mention(comment1, listOf("https://bob.example/elsewhere"), seenAt = 2, viaId = eve.id),
+                    mention("https://bob.example/post", listOf(alice), seenAt = 3),
+                    mention(dave, listOf("https://bob.example/post#comment-99"), seenAt = 4),
+                ),
+            )
+
+        assertEquals("https://bob.example/post", threaded.parentOf(dave))
+    }
 }
