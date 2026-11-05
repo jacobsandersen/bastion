@@ -20,7 +20,8 @@ data class ThreadedWebmention(
  * canonical URL appears in its `in-reply-to`. A nested response that names no
  * known parent falls back to the source that displays it. Nested responses
  * whose displaying source is not shown are hidden, and a reply cycle is broken
- * at its oldest member, which becomes a top-level response.
+ * at its oldest member, which becomes a top-level response; responses that
+ * only lead into a cycle keep their parent.
  */
 object WebmentionThreadResolver {
     fun resolve(mentions: List<ReceivedWebmention>): List<ThreadedWebmention> {
@@ -49,17 +50,7 @@ object WebmentionThreadResolver {
             parentOf[mention.id] = explicit ?: mention.viaId?.let(byId::get)
         }
 
-        visible.forEach { mention ->
-            val seen = mutableSetOf(mention.id)
-            var ancestor = parentOf[mention.id]
-            while (ancestor != null) {
-                if (!seen.add(ancestor.id)) {
-                    parentOf[mention.id] = null
-                    break
-                }
-                ancestor = parentOf[ancestor.id]
-            }
-        }
+        breakCycles(visible, parentOf)
 
         return visible.map { mention ->
             ThreadedWebmention(
@@ -69,6 +60,35 @@ object WebmentionThreadResolver {
                 parent = parentOf[mention.id],
                 via = mention.viaId?.let(byId::get),
             )
+        }
+    }
+
+    /**
+     * Each response has at most one parent, so every cycle is a simple loop.
+     * Walk each unvisited chain; when it runs back into the current walk, the
+     * nodes from that point on form a cycle, and only its oldest member is
+     * detached. Responses that merely lead into a cycle keep their parent.
+     */
+    private fun breakCycles(
+        visible: List<ReceivedWebmention>,
+        parentOf: MutableMap<UUID, ReceivedWebmention?>,
+    ) {
+        val done = mutableSetOf<UUID>()
+        visible.forEach { start ->
+            val path = mutableListOf<ReceivedWebmention>()
+            val onPath = mutableSetOf<UUID>()
+            var current: ReceivedWebmention? = start
+            while (current != null && current.id !in done && onPath.add(current.id)) {
+                path += current
+                current = parentOf[current.id]
+            }
+            val entry = current
+            if (entry != null && entry.id in onPath) {
+                val cycle = path.subList(path.indexOfFirst { it.id == entry.id }, path.size)
+                val oldest = cycle.minWith(compareBy<ReceivedWebmention> { it.firstSeenAt }.thenBy { it.id })
+                parentOf[oldest.id] = null
+            }
+            path.forEach { done += it.id }
         }
     }
 }

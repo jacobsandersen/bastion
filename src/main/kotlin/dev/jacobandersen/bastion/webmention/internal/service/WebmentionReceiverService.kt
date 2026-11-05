@@ -18,6 +18,7 @@ private val logger = KotlinLogging.logger {}
  * confirms it mentions the target (section 3.2.2) and records the outcome
  * (section 3.2.4), extracting interaction type, author and content data when the
  * source is valid.
+ * Our own replies shown nested on someone else's page are never imported.
  *
  * When the outcome changes what the target post displays (a new, edited or
  * removed response, including nested responses), a Salmention resend is
@@ -64,8 +65,7 @@ class WebmentionReceiverService(
                 SourceVerdict.VERIFIED -> {
                     val analysis =
                         verification.parse
-                            ?.let { ReceivedWebmentionAnalyzer.analyze(it, sourceUrl) }
-                            ?.let(::withoutOwnContent)
+                            ?.let { ReceivedWebmentionAnalyzer.analyze(it, sourceUrl, contentUrlMatcher::isOwnContentUrl) }
                             ?: ReceivedWebmentionAnalysis(interaction = MENTION, primary = null)
                     logger.info {
                         "Verified webmention from $sourceUrl as ${analysis.interaction} with ${analysis.nested.size} nested responses"
@@ -79,8 +79,4 @@ class WebmentionReceiverService(
             jobScheduler.enqueue { salmentionService.resendAfterResponseChange(postId) }
         }
     }
-
-    /** Our own replies shown on someone else's page are already ours; never import them as responses. */
-    private fun withoutOwnContent(analysis: ReceivedWebmentionAnalysis): ReceivedWebmentionAnalysis =
-        analysis.copy(nested = analysis.nested.filterNot { contentUrlMatcher.isOwnContentUrl(it.url) })
 }

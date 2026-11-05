@@ -54,13 +54,18 @@ object ReceivedWebmentionAnalyzer {
 
     private val nestedTypes = setOf("h-entry", "h-cite")
 
+    private val contextProperties = listOf("in-reply-to", "like-of", "repost-of", "bookmark-of")
+
     /**
      * Analyzes [parseResult]. [sourceUrl] is the webmention source; nested
-     * responses equal to it are ignored.
+     * responses equal to it are ignored. Nested responses whose URL matches
+     * [exclude] (such as our own replies shown on someone else's page) are
+     * skipped with their subtree and do not count toward the nested limit.
      */
     fun analyze(
         parseResult: Mf2ParseResult,
         sourceUrl: String? = null,
+        exclude: (String) -> Boolean = { false },
     ): ReceivedWebmentionAnalysis {
         val primary = primaryObject(parseResult)
         if (primary == null) {
@@ -68,10 +73,23 @@ object ReceivedWebmentionAnalyzer {
         }
 
         val analysis = analyzeObject(primary, classifyProperties(primary) ?: classifyRels(parseResult) ?: MENTION)
-        val seen = listOfNotNull(sourceUrl, analysis.url).map(::normalizeUrl).toMutableSet()
+        return analysis.copy(nested = nestedResponses(primary, sourceUrl, exclude))
+    }
+
+    /**
+     * The responses [primary] displays nested inside itself, flattened in
+     * document order. Also used to re-read a stored source's microformats.
+     */
+    fun nestedResponses(
+        primary: Mf2Object,
+        sourceUrl: String?,
+        exclude: (String) -> Boolean,
+    ): List<NestedResponse> {
+        val primaryUrl = canonicalUrl(primary)
+        val seen = listOfNotNull(sourceUrl, primaryUrl).map(::normalizeUrl).toMutableSet()
         val nested = mutableListOf<NestedResponse>()
-        collectNested(primary, analysis.url ?: sourceUrl, 1, seen, nested)
-        return analysis.copy(nested = nested)
+        collectNested(primary, primaryUrl ?: sourceUrl, 1, seen, exclude, nested)
+        return nested
     }
 
     /** The canonical URL of a microformats object: its first `url`, else its `uid`. */
@@ -118,21 +136,27 @@ object ReceivedWebmentionAnalyzer {
     /**
      * Walks the responses displayed inside [container] depth first, in
      * document order. A nested response that declares no `in-reply-to` is
-     * taken to reply to its container. Responses without a URL cannot be keyed
-     * and are skipped along with their subtree.
+     * taken to reply to its container. An item without a URL cannot be keyed,
+     * so it is skipped but its children are still walked against the same
+     * container.
      */
     private fun collectNested(
         container: Mf2Object,
         containerUrl: String?,
         depth: Int,
         seen: MutableSet<String>,
+        exclude: (String) -> Boolean,
         out: MutableList<NestedResponse>,
     ) {
         if (depth > MAX_NESTED_DEPTH) return
         for (candidate in nestedCandidates(container)) {
             if (out.size >= MAX_NESTED_RESPONSES) return
-            val url = canonicalUrl(candidate) ?: continue
-            if (!seen.add(normalizeUrl(url))) continue
+            val url = canonicalUrl(candidate)
+            if (url == null) {
+                collectNested(candidate, containerUrl, depth + 1, seen, exclude, out)
+                continue
+            }
+            if (exclude(url) || !seen.add(normalizeUrl(url))) continue
 
             // A displayed comment with no explicit response property is a reply to what contains it.
             val analysis = analyzeObject(candidate, classifyProperties(candidate) ?: REPLY)
@@ -143,19 +167,41 @@ object ReceivedWebmentionAnalyzer {
                     analysis
                 }
             out += NestedResponse(url, threaded)
-            collectNested(candidate, url, depth + 1, seen, out)
+            collectNested(candidate, url, depth + 1, seen, exclude, out)
         }
     }
 
+    /**
+     * `comment` property values plus nested h-entry/h-cite children. A bare
+     * child that is the container's own reply/like/repost/bookmark context
+     * (the post it responds to) is not a response to it and is left out.
+     */
     private fun nestedCandidates(container: Mf2Object): List<Mf2Object> {
         val comments =
             container
                 .getProperty("comment")
                 .filterIsInstance<Mf2Value.Object>()
                 .map { it.value }
-        val children = container.children.orEmpty().filter { child -> child.type.any { it in nestedTypes } }
+        val contextUrls = contextUrlsOf(container)
+        val children =
+            container.children.orEmpty().filter { child ->
+                child.type.any { it in nestedTypes } &&
+                    canonicalUrl(child)?.let { normalizeUrl(it) in contextUrls } != true
+            }
         return comments + children
     }
+
+    private fun contextUrlsOf(obj: Mf2Object): Set<String> =
+        contextProperties
+            .flatMap { property ->
+                obj.getProperty(property).mapNotNull { value ->
+                    when (value) {
+                        is Mf2Value.Object -> canonicalUrl(value.value)
+                        else -> value.plainTextOrNull
+                    }
+                }
+            }.map(::normalizeUrl)
+            .toSet()
 
     /**
      * The primary object of the source: the first h-entry encountered walking

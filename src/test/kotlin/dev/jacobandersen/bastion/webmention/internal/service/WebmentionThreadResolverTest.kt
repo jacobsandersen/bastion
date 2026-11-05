@@ -142,4 +142,21 @@ class WebmentionThreadResolverTest {
         assertEquals(bob, threaded.parentOf(carol))
         assertEquals(listOf(bob), threaded.single { it.mention.sourceUrl == carol }.inReplyTo)
     }
+
+    @Test
+    fun `keeps the parent of a response that only leads into a cycle`() {
+        val dave = "https://dave.example/r/1"
+        val threaded =
+            WebmentionThreadResolver.resolve(
+                listOf(
+                    mention(bob, listOf(carol), seenAt = 1),
+                    mention(carol, listOf(dave), seenAt = 2),
+                    mention(dave, listOf(carol), seenAt = 3),
+                ),
+            )
+
+        assertEquals(carol, threaded.parentOf(bob))
+        assertNull(threaded.parentOf(carol))
+        assertEquals(carol, threaded.parentOf(dave))
+    }
 }

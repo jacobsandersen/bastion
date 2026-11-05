@@ -233,4 +233,71 @@ class ReceivedWebmentionAnalyzerTest {
         val wide = analyze("""<article class="h-entry"><a class="u-url" href="https://bob.example/1">p</a>$many</article>""")
         assertEquals(ReceivedWebmentionAnalyzer.MAX_NESTED_RESPONSES, wide.nested.size)
     }
+
+    @Test
+    fun `does not treat a bare reply context child as a nested response`() {
+        val analysis =
+            analyze(
+                """
+                <article class="h-entry">
+                  <a class="u-url" href="https://bob.example/comments/1">permalink</a>
+                  <a class="u-in-reply-to" href="https://dave.example/posts/1">Dave</a>
+                  <div class="h-cite">
+                    <a class="u-url p-name" href="https://dave.example/posts/1">Dave's post</a>
+                  </div>
+                  <div class="p-comment h-cite">
+                    <a class="u-url" href="https://carol.example/replies/1">Carol</a>
+                  </div>
+                </article>
+                """.trimIndent(),
+            )
+
+        assertEquals(listOf("https://carol.example/replies/1"), analysis.nested.map { it.url })
+    }
+
+    @Test
+    fun `walks through nested items without a url to reach addressable replies`() {
+        val analysis =
+            analyze(
+                """
+                <article class="h-entry">
+                  <a class="u-url" href="https://bob.example/comments/1">permalink</a>
+                  <div class="p-comment h-cite">
+                    <p class="p-content">anonymous wrapper</p>
+                    <div class="p-comment h-cite">
+                      <a class="u-url" href="https://carol.example/replies/1">Carol</a>
+                    </div>
+                  </div>
+                </article>
+                """.trimIndent(),
+            )
+
+        assertEquals(listOf("https://carol.example/replies/1"), analysis.nested.map { it.url })
+        assertEquals(
+            listOf("https://bob.example/comments/1"),
+            analysis.nested
+                .single()
+                .analysis.inReplyTo,
+        )
+    }
+
+    @Test
+    fun `excluded responses do not use up the nested limit`() {
+        val own =
+            (1..ReceivedWebmentionAnalyzer.MAX_NESTED_RESPONSES).joinToString("") {
+                """<div class="p-comment h-cite"><a class="u-url" href="https://own.example/$it">x</a></div>"""
+            }
+        val html =
+            """<article class="h-entry"><a class="u-url" href="https://bob.example/1">p</a>$own""" +
+                """<div class="p-comment h-cite"><a class="u-url" href="https://carol.example/1">c</a></div></article>"""
+
+        val analysis =
+            ReceivedWebmentionAnalyzer.analyze(
+                Mf2ParserImpl().parse(html, "https://bob.example/1"),
+                sourceUrl = "https://bob.example/1",
+                exclude = { it.startsWith("https://own.example/") },
+            )
+
+        assertEquals(listOf("https://carol.example/1"), analysis.nested.map { it.url })
+    }
 }

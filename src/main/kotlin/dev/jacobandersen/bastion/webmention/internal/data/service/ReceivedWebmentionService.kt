@@ -12,6 +12,7 @@ import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebment
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionUpdate
 import dev.jacobandersen.bastion.webmention.internal.data.entity.ReceivedWebmentionEntity
 import dev.jacobandersen.bastion.webmention.internal.data.repository.ReceivedWebmentionRepository
+import dev.jacobandersen.bastion.webmention.internal.service.ReceivedWebmentionAnalyzer
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.security.MessageDigest
@@ -96,13 +97,14 @@ class ReceivedWebmentionService(
 
         entity.state = VERIFIED
         applyAnalysis(entity, analysis)
-        entity.displayFingerprint = fingerprint(analysis)
         entity.lastError = null
         entity.verifiedAt = now
         entity.updatedAtUtc = now
         val saved = repository.save(entity)
 
-        replaceNested(saved, analysis.nested, now)
+        val shown = replaceNested(saved, analysis.nested, now)
+        saved.displayFingerprint = fingerprint(analysis.copy(nested = shown))
+        repository.save(saved)
 
         return ReceivedWebmentionUpdate(saved.toDomain(), changed = previousFingerprint != saved.displayFingerprint)
     }
@@ -144,20 +146,25 @@ class ReceivedWebmentionService(
         repository.findByPostIdInAndState(postIds, VERIFIED).map { it.toDomain() }
 
     /**
-     * Upserts the nested responses displayed by [via] and removes the ones it
-     * no longer displays. Rows owned by a direct webmention or by another
-     * source are left alone.
+     * Upserts the nested responses displayed by [via] and releases the ones it
+     * no longer displays. A response with a direct webmention is hidden behind
+     * it and left alone; one already owned by another displaying source stays
+     * with that source. Returns the nested responses the post actually shows
+     * through [via], which is what its fingerprint covers.
      */
     private fun replaceNested(
         via: ReceivedWebmentionEntity,
         nested: List<NestedResponse>,
         now: Instant,
-    ) {
+    ): List<NestedResponse> {
         val viaId = requireNotNull(via.id)
         val owned = mutableSetOf<UUID>()
+        val shown = mutableListOf<NestedResponse>()
 
         nested.forEach { response ->
             val existing = repository.findBySourceUrlAndPostId(response.url, via.postId)
+            if (existing != null && existing.viaId == null) return@forEach
+            shown += response
             if (existing != null && existing.viaId != viaId) return@forEach
 
             val entity =
@@ -191,8 +198,51 @@ class ReceivedWebmentionService(
             owned += requireNotNull(repository.save(entity).id)
         }
 
-        val stale = repository.findByViaId(viaId).filterNot { requireNotNull(it.id) in owned }
-        if (stale.isNotEmpty()) repository.deleteAll(stale)
+        releaseNested(repository.findByViaId(viaId).filterNot { requireNotNull(it.id) in owned }, viaId, now)
+        return shown
+    }
+
+    /**
+     * Releases nested rows whose owning source [formerOwnerId] no longer
+     * displays them. A row another verified source on the post still displays
+     * (per its stored microformats) moves to that source; the rest are
+     * deleted. This keeps a response two sources display from disappearing
+     * when only one of them drops it.
+     */
+    private fun releaseNested(
+        rows: List<ReceivedWebmentionEntity>,
+        formerOwnerId: UUID,
+        now: Instant,
+    ) {
+        if (rows.isEmpty()) return
+
+        val heirs by lazy {
+            repository
+                .findByPostIdAndState(rows.first().postId, VERIFIED)
+                .filter { it.viaId == null && it.id != formerOwnerId && it.rawMf2 != null }
+                .map { candidate ->
+                    val displayed =
+                        ReceivedWebmentionAnalyzer
+                            .nestedResponses(requireNotNull(candidate.rawMf2), candidate.sourceUrl) { false }
+                            .map { ReceivedWebmentionAnalyzer.normalizeUrl(it.url) }
+                            .toSet()
+                    candidate to displayed
+                }
+        }
+
+        val orphans =
+            rows.filter { row ->
+                val key = ReceivedWebmentionAnalyzer.normalizeUrl(row.sourceUrl)
+                val heir = heirs.firstOrNull { (_, displayed) -> key in displayed }?.first
+                if (heir != null) {
+                    row.viaId = heir.id
+                    row.targetUrl = heir.targetUrl
+                    row.updatedAtUtc = now
+                    repository.save(row)
+                }
+                heir == null
+            }
+        if (orphans.isNotEmpty()) repository.deleteAll(orphans)
     }
 
     private fun applyAnalysis(
@@ -228,10 +278,7 @@ class ReceivedWebmentionService(
         // An error is transient: keep what was displayed so recovering with the same content is not a change.
         if (state != ERROR) {
             entity.displayFingerprint = null
-            entity.id?.let { id ->
-                val nested = repository.findByViaId(id)
-                if (nested.isNotEmpty()) repository.deleteAll(nested)
-            }
+            entity.id?.let { id -> releaseNested(repository.findByViaId(id), id, now) }
         }
         if (state == DELETED) {
             entity.interaction = null

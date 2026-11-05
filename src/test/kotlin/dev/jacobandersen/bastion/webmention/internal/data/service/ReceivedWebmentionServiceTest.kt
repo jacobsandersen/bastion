@@ -6,6 +6,8 @@ import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebment
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.entity.ReceivedWebmentionEntity
 import dev.jacobandersen.bastion.webmention.internal.data.repository.ReceivedWebmentionRepository
+import dev.jacobandersen.microformats2.Mf2Object
+import dev.jacobandersen.microformats2.Mf2Value
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
+import org.mockito.Mockito.atLeastOnce
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
@@ -250,7 +253,7 @@ class ReceivedWebmentionServiceTest {
         assertEquals(sourceUrl, parent.url)
         assertEquals(listOf(targetUrl), parent.inReplyTo)
         val captor = ArgumentCaptor.forClass(ReceivedWebmentionEntity::class.java)
-        verify(repository, times(2)).save(captor.capture())
+        verify(repository, atLeastOnce()).save(captor.capture())
         val nested = captor.allValues.single { it.sourceUrl == carolUrl }
         assertEquals(parent.id, nested.viaId)
         assertEquals(ReceivedWebmentionState.VERIFIED, nested.state)
@@ -352,5 +355,85 @@ class ReceivedWebmentionServiceTest {
         assertFalse(update.changed)
         assertEquals("shown", parent.displayFingerprint)
         verify(repository, never()).findByViaId(any())
+    }
+
+    @Test
+    fun `a nested copy hidden behind a direct webmention does not affect the fingerprint`() {
+        verifiedParent()
+        service.markVerified(sourceUrl, postId, reply("Bob"))
+        val withoutCarol = service.markVerified(sourceUrl, postId, reply("Bob")).webmention.displayFingerprint
+
+        val direct =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+            }
+        `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(direct)
+        val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertFalse(update.changed)
+        assertEquals(withoutCarol, update.webmention.displayFingerprint)
+    }
+
+    @Test
+    fun `a nested response owned by another source still counts as shown`() {
+        verifiedParent()
+        service.markVerified(sourceUrl, postId, reply("Bob"))
+        val ownedElsewhere =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(ownedElsewhere)
+
+        val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertTrue(update.changed)
+        verify(repository, never()).save(ownedElsewhere)
+    }
+
+    @Test
+    fun `markDeleted hands a nested response to another source that still displays it`() {
+        val parent = verifiedParent()
+        parent.displayFingerprint = "shown"
+        val nested =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                it.viaId = parent.id
+            }
+        val dave =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = "https://dave.example/comments/1"
+                it.targetUrl = "https://bastion.test/2026/01/01/post#dave"
+                it.rawMf2 =
+                    Mf2Object(
+                        type = listOf("h-entry"),
+                        properties =
+                            mapOf(
+                                "comment" to
+                                    listOf(
+                                        Mf2Value.Object(
+                                            Mf2Object(
+                                                type = listOf("h-cite"),
+                                                properties = mapOf("url" to listOf(Mf2Value.String(carolUrl))),
+                                            ),
+                                        ),
+                                    ),
+                            ),
+                    )
+            }
+        `when`(repository.findByViaId(requireNotNull(parent.id))).thenReturn(listOf(nested))
+        `when`(repository.findByPostIdAndState(postId, ReceivedWebmentionState.VERIFIED)).thenReturn(listOf(parent, dave))
+
+        val update = service.markDeleted(sourceUrl, postId)
+
+        assertTrue(update.changed)
+        assertEquals(dave.id, nested.viaId)
+        assertEquals(dave.targetUrl, nested.targetUrl)
+        verify(repository).save(nested)
+        verify(repository, never()).deleteAll(any<List<ReceivedWebmentionEntity>>())
     }
 }
