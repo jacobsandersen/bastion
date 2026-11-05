@@ -1,17 +1,21 @@
 package dev.jacobandersen.bastion.webmention.internal.data.service
 
+import dev.jacobandersen.bastion.webmention.internal.data.domain.NestedResponse
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionAnalysis
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionState
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.entity.ReceivedWebmentionEntity
 import dev.jacobandersen.bastion.webmention.internal.data.repository.ReceivedWebmentionRepository
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -202,5 +206,151 @@ class ReceivedWebmentionServiceTest {
 
         assertEquals(1, result.size)
         assertEquals(saved.id, result[0].id)
+    }
+
+    private val carolUrl = "https://carol.example/replies/1"
+
+    private fun reply(
+        content: String,
+        nested: List<NestedResponse> = emptyList(),
+    ) = ReceivedWebmentionAnalysis(
+        interaction = WebmentionInteraction.REPLY,
+        primary = null,
+        contentText = listOf(content),
+        url = sourceUrl,
+        inReplyTo = listOf(targetUrl),
+        nested = nested,
+    )
+
+    private fun carol(content: String = "Carol's reply") =
+        NestedResponse(
+            carolUrl,
+            ReceivedWebmentionAnalysis(
+                interaction = WebmentionInteraction.REPLY,
+                primary = null,
+                contentText = listOf(content),
+                url = carolUrl,
+                inReplyTo = listOf(sourceUrl),
+            ),
+        )
+
+    private fun verifiedParent(): ReceivedWebmentionEntity =
+        entity().also {
+            it.id = UUID.randomUUID()
+            `when`(repository.findBySourceUrlAndPostId(sourceUrl, postId)).thenReturn(it)
+        }
+
+    @Test
+    fun `markVerified stores threading data and nested responses via the source`() {
+        val parent = verifiedParent()
+
+        val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertTrue(update.changed)
+        assertEquals(sourceUrl, parent.url)
+        assertEquals(listOf(targetUrl), parent.inReplyTo)
+        val captor = ArgumentCaptor.forClass(ReceivedWebmentionEntity::class.java)
+        verify(repository, times(2)).save(captor.capture())
+        val nested = captor.allValues.single { it.sourceUrl == carolUrl }
+        assertEquals(parent.id, nested.viaId)
+        assertEquals(ReceivedWebmentionState.VERIFIED, nested.state)
+        assertEquals(targetUrl, nested.targetUrl)
+        assertEquals(listOf(sourceUrl), nested.inReplyTo)
+        assertNotNull(nested.verifiedAt)
+    }
+
+    @Test
+    fun `markVerified reports no change when the displayed content is identical`() {
+        val parent = verifiedParent()
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        // A later re-verification goes through ensurePending first; the fingerprint must survive it.
+        parent.state = ReceivedWebmentionState.PENDING
+        val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertFalse(update.changed)
+    }
+
+    @Test
+    fun `markVerified reports a change when only a nested response changed`() {
+        verifiedParent()
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        val update = service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol("edited"))))
+
+        assertTrue(update.changed)
+    }
+
+    @Test
+    fun `markVerified never overwrites a directly received webmention`() {
+        verifiedParent()
+        val direct =
+            entity(state = ReceivedWebmentionState.DELETED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+            }
+        `when`(repository.findBySourceUrlAndPostId(carolUrl, postId)).thenReturn(direct)
+
+        service.markVerified(sourceUrl, postId, reply("Bob", listOf(carol())))
+
+        assertEquals(ReceivedWebmentionState.DELETED, direct.state)
+        verify(repository, never()).save(direct)
+    }
+
+    @Test
+    fun `markVerified removes nested responses the source no longer displays`() {
+        val parent = verifiedParent()
+        val stale =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.sourceUrl = carolUrl
+                it.viaId = parent.id
+            }
+        `when`(repository.findByViaId(requireNotNull(parent.id))).thenReturn(listOf(stale))
+
+        service.markVerified(sourceUrl, postId, reply("Bob"))
+
+        verify(repository).deleteAll(listOf(stale))
+    }
+
+    @Test
+    fun `ensurePending turns a nested copy into a direct webmention`() {
+        val nested =
+            entity(state = ReceivedWebmentionState.VERIFIED).also {
+                it.id = UUID.randomUUID()
+                it.viaId = UUID.randomUUID()
+            }
+        `when`(repository.findBySourceUrlAndPostId(sourceUrl, postId)).thenReturn(nested)
+
+        service.ensurePending(sourceUrl, targetUrl, postId)
+
+        assertNull(nested.viaId)
+        assertEquals(ReceivedWebmentionState.PENDING, nested.state)
+    }
+
+    @Test
+    fun `markDeleted drops nested responses and reports a change when it was displayed`() {
+        val parent = verifiedParent()
+        parent.displayFingerprint = "shown"
+        val nested = entity().also { it.viaId = parent.id }
+        `when`(repository.findByViaId(requireNotNull(parent.id))).thenReturn(listOf(nested))
+
+        val update = service.markDeleted(sourceUrl, postId)
+
+        assertTrue(update.changed)
+        assertNull(parent.displayFingerprint)
+        verify(repository).deleteAll(listOf(nested))
+    }
+
+    @Test
+    fun `markError keeps what was displayed and reports no change`() {
+        val parent = verifiedParent()
+        parent.displayFingerprint = "shown"
+
+        val update = service.markError(sourceUrl, postId, "timeout")
+
+        assertFalse(update.changed)
+        assertEquals("shown", parent.displayFingerprint)
+        verify(repository, never()).findByViaId(any())
     }
 }

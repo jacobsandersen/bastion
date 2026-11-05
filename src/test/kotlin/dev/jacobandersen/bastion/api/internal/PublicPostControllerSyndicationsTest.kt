@@ -98,6 +98,10 @@ class PublicPostControllerSyndicationsTest {
                 contentHtml = emptyList(),
                 firstSeenAt = Instant.parse("2026-01-03T00:00:00Z"),
                 verifiedAt = Instant.parse("2026-01-03T00:00:00Z"),
+                url = null,
+                inReplyTo = emptyList(),
+                parentSourceUrl = null,
+                viaSourceUrl = null,
             )
         whenever(postReadService.feed(any<PostFeedQuery>())).thenReturn(PostFeedPage(listOf(post), 1))
         whenever(postReadService.syndicationLinksByPostIds(any()))

@@ -53,6 +53,15 @@ class ReceivedWebmentionEntity(
     @JdbcTypeCode(SqlTypes.JSON)
     var rawMf2: Mf2Object?,
     @Column(nullable = true)
+    var url: String? = null,
+    @Column(nullable = true, columnDefinition = "text[]")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    var inReplyTo: List<String>? = null,
+    @Column(nullable = true)
+    var viaId: UUID? = null,
+    @Column(nullable = true)
+    var displayFingerprint: String? = null,
+    @Column(nullable = true)
     var lastError: String?,
     @Column(nullable = false)
     var firstSeenAt: Instant,
@@ -75,6 +84,10 @@ class ReceivedWebmentionEntity(
             contentText = contentText ?: emptyList(),
             contentHtml = contentHtml ?: emptyList(),
             rawMf2 = rawMf2,
+            url = url,
+            inReplyTo = inReplyTo,
+            viaId = viaId,
+            displayFingerprint = displayFingerprint,
             lastError = lastError,
             firstSeenAt = firstSeenAt,
             verifiedAt = verifiedAt,

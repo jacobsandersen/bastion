@@ -3,6 +3,8 @@ package dev.jacobandersen.bastion.webmention.read
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmention
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.service.ReceivedWebmentionService
+import dev.jacobandersen.bastion.webmention.internal.service.ThreadedWebmention
+import dev.jacobandersen.bastion.webmention.internal.service.WebmentionThreadResolver
 import org.springframework.stereotype.Service
 import java.util.UUID
 
@@ -10,9 +12,12 @@ import java.util.UUID
 class WebmentionReadService(
     private val receivedWebmentionService: ReceivedWebmentionService,
 ) {
-    fun verifiedByPost(postId: UUID): List<WebmentionView> = receivedWebmentionService.verifiedByPost(postId).map(::toView)
+    /** Verified webmentions for a post, oldest first, each with its place in the reply thread. */
+    fun verifiedByPost(postId: UUID): List<WebmentionView> =
+        WebmentionThreadResolver.resolve(receivedWebmentionService.verifiedByPost(postId)).map(::toView)
 
-    fun countsForPost(postId: UUID): WebmentionCountsView = countsOf(receivedWebmentionService.verifiedByPost(postId))
+    fun countsForPost(postId: UUID): WebmentionCountsView =
+        countsOf(WebmentionThreadResolver.resolve(receivedWebmentionService.verifiedByPost(postId)))
 
     fun countsByPostIds(postIds: Collection<UUID>): Map<UUID, WebmentionCountsView> = byPostIds(postIds).mapValues { it.value.counts }
 
@@ -25,23 +30,24 @@ class WebmentionReadService(
 
         val byPost = receivedWebmentionService.verifiedByPostIds(postIds).groupBy { it.postId }
         return postIds.associateWith { postId ->
-            val mentions = byPost[postId].orEmpty()
+            val threaded = WebmentionThreadResolver.resolve(byPost[postId].orEmpty())
             PostWebmentionsView(
-                counts = countsOf(mentions),
-                webmentions = mentions.sortedBy { it.firstSeenAt }.map(::toView),
+                counts = countsOf(threaded),
+                webmentions = threaded.map(::toView),
             )
         }
     }
 
-    private fun countsOf(mentions: List<ReceivedWebmention>): WebmentionCountsView =
+    private fun countsOf(mentions: List<ThreadedWebmention>): WebmentionCountsView =
         WebmentionCountsView.of(
             mentions
-                .groupingBy { (it.interaction ?: WebmentionInteraction.MENTION).name }
+                .groupingBy { (it.mention.interaction ?: WebmentionInteraction.MENTION).name }
                 .eachCount(),
         )
 
-    private fun toView(mention: ReceivedWebmention): WebmentionView =
-        WebmentionView(
+    private fun toView(threaded: ThreadedWebmention): WebmentionView {
+        val mention: ReceivedWebmention = threaded.mention
+        return WebmentionView(
             sourceUrl = mention.sourceUrl,
             targetUrl = mention.targetUrl,
             interaction = (mention.interaction ?: WebmentionInteraction.MENTION).name,
@@ -52,5 +58,10 @@ class WebmentionReadService(
             contentHtml = mention.contentHtml,
             firstSeenAt = mention.firstSeenAt,
             verifiedAt = requireNotNull(mention.verifiedAt) { "verified webmention ${mention.id} missing verifiedAt" },
+            url = threaded.url,
+            inReplyTo = threaded.inReplyTo,
+            parentSourceUrl = threaded.parent?.sourceUrl,
+            viaSourceUrl = threaded.via?.sourceUrl,
         )
+    }
 }

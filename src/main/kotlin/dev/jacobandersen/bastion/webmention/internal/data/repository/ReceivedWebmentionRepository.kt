@@ -15,6 +15,8 @@ interface ReceivedWebmentionRepository : JpaRepository<ReceivedWebmentionEntity,
 
     fun findByPostId(postId: UUID): List<ReceivedWebmentionEntity>
 
+    fun findByViaId(viaId: UUID): List<ReceivedWebmentionEntity>
+
     fun findByPostIdAndState(
         postId: UUID,
         state: ReceivedWebmentionState,

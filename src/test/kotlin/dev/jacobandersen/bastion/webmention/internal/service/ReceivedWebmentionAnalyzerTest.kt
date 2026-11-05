@@ -3,6 +3,7 @@ package dev.jacobandersen.bastion.webmention.internal.service
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.microformats2.Mf2ParserImpl
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ReceivedWebmentionAnalyzerTest {
@@ -139,5 +140,97 @@ class ReceivedWebmentionAnalyzerTest {
             analyze("""<html><body><p>just prose <a href="https://blog.example/1">link</a></p></body></html>""")
         assertEquals(WebmentionInteraction.MENTION, analysis.interaction)
         assertEquals(null, analysis.primary)
+    }
+
+    @Test
+    fun `extracts the canonical url and in-reply-to from plain and h-cite values`() {
+        val analysis =
+            analyze(
+                """
+                <article class="h-entry">
+                  <a class="u-url" href="https://carol.example/replies/1">permalink</a>
+                  <a class="u-in-reply-to" href="https://bob.example/comments/1#c">Bob</a>
+                  <div class="u-in-reply-to h-cite">
+                    <a class="u-url p-name" href="https://blog.example/2026/01/01/post">Alice's post</a>
+                  </div>
+                  <p class="e-content">Replying to Bob</p>
+                </article>
+                """.trimIndent(),
+                baseUrl = "https://carol.example/replies/1",
+            )
+
+        assertEquals(WebmentionInteraction.REPLY, analysis.interaction)
+        assertEquals("https://carol.example/replies/1", analysis.url)
+        assertEquals(
+            listOf("https://bob.example/comments/1#c", "https://blog.example/2026/01/01/post"),
+            analysis.inReplyTo,
+        )
+    }
+
+    @Test
+    fun `collects nested comments recursively and threads them to their container`() {
+        val analysis =
+            ReceivedWebmentionAnalyzer.analyze(
+                Mf2ParserImpl().parse(
+                    """
+                    <article class="h-entry">
+                      <a class="u-url" href="https://bob.example/comments/1">permalink</a>
+                      <a class="u-in-reply-to" href="https://blog.example/2026/01/01/post">Alice</a>
+                      <p class="e-content">Bob's comment</p>
+                      <div class="p-comment h-cite">
+                        <a class="p-author h-card" href="https://carol.example/">Carol</a>
+                        <a class="u-url" href="https://carol.example/replies/1">permalink</a>
+                        <p class="p-content">Carol's reply</p>
+                        <div class="p-comment h-cite">
+                          <a class="u-url" href="https://dave.example/r/1">permalink</a>
+                          <a class="u-like-of" href="https://carol.example/replies/1">liked</a>
+                        </div>
+                      </div>
+                      <div class="h-entry">
+                        <a class="u-url" href="https://erin.example/n/1">permalink</a>
+                        <a class="u-in-reply-to" href="https://carol.example/replies/1">Carol</a>
+                        <p class="e-content">Erin agrees</p>
+                      </div>
+                      <div class="p-comment h-cite"><p class="p-content">no url, skipped</p></div>
+                    </article>
+                    """.trimIndent(),
+                    "https://bob.example/comments/1",
+                ),
+                sourceUrl = "https://bob.example/comments/1",
+            )
+
+        assertEquals(
+            listOf("https://carol.example/replies/1", "https://dave.example/r/1", "https://erin.example/n/1"),
+            analysis.nested.map { it.url },
+        )
+        val carol = analysis.nested[0].analysis
+        assertEquals(WebmentionInteraction.REPLY, carol.interaction)
+        assertEquals("Carol", carol.authorName)
+        assertEquals(listOf("https://bob.example/comments/1"), carol.inReplyTo)
+        assertEquals(listOf("Carol's reply"), carol.contentText)
+        val dave = analysis.nested[1].analysis
+        assertEquals(WebmentionInteraction.LIKE, dave.interaction)
+        assertEquals(listOf("https://carol.example/replies/1"), dave.inReplyTo)
+        assertEquals(listOf("https://carol.example/replies/1"), analysis.nested[2].analysis.inReplyTo)
+        assertTrue(analysis.nested.all { it.analysis.nested.isEmpty() })
+    }
+
+    @Test
+    fun `limits nested comment depth and count`() {
+        fun nest(depth: Int): String =
+            if (depth == 0) {
+                ""
+            } else {
+                """<div class="p-comment h-cite"><a class="u-url" href="https://deep.example/$depth">x</a>${nest(depth - 1)}</div>"""
+            }
+        val deep = analyze("""<article class="h-entry"><a class="u-url" href="https://bob.example/1">p</a>${nest(8)}</article>""")
+        assertEquals(ReceivedWebmentionAnalyzer.MAX_NESTED_DEPTH, deep.nested.size)
+
+        val many =
+            (1..80).joinToString("") {
+                """<div class="p-comment h-cite"><a class="u-url" href="https://many.example/$it">x</a></div>"""
+            }
+        val wide = analyze("""<article class="h-entry"><a class="u-url" href="https://bob.example/1">p</a>$many</article>""")
+        assertEquals(ReceivedWebmentionAnalyzer.MAX_NESTED_RESPONSES, wide.nested.size)
     }
 }

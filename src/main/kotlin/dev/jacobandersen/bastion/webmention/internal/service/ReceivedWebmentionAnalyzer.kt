@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.webmention.internal.service
 
+import dev.jacobandersen.bastion.webmention.internal.data.domain.NestedResponse
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmentionAnalysis
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction.BOOKMARK
@@ -13,6 +14,7 @@ import dev.jacobandersen.microformats2.Mf2ParseResult
 import dev.jacobandersen.microformats2.Mf2Value
 import dev.jacobandersen.microformats2.firstText
 import dev.jacobandersen.microformats2.htmls
+import dev.jacobandersen.microformats2.plainTextOrNull
 import dev.jacobandersen.microformats2.texts
 
 /**
@@ -21,8 +23,18 @@ import dev.jacobandersen.microformats2.texts
  * its `rsvp`/`in-reply-to`/`like-of`/`repost-of`/`bookmark-of` properties
  * (falling back to document-level `rel` attributes when the object declares
  * none) and extracts author/content data.
+ *
+ * For Salmention it also extracts the response's canonical URL, what it
+ * replies to, and the responses it displays nested inside its own entry
+ * (`comment` property values and nested h-entry/h-cite children), recursively.
  */
 object ReceivedWebmentionAnalyzer {
+    /** How deep nested comments are followed below the primary entry. */
+    const val MAX_NESTED_DEPTH = 5
+
+    /** The most nested responses taken from a single source. */
+    const val MAX_NESTED_RESPONSES = 50
+
     private val interactionProperties: List<Pair<String, WebmentionInteraction>> =
         listOf(
             "rsvp" to RSVP,
@@ -40,29 +52,109 @@ object ReceivedWebmentionAnalyzer {
             "bookmark-of" to BOOKMARK,
         )
 
-    fun analyze(parseResult: Mf2ParseResult): ReceivedWebmentionAnalysis {
-        val primary = primaryObject(parseResult)
-        val interaction =
-            primary?.let(::classifyProperties)
-                ?: classifyRels(parseResult)
-                ?: MENTION
+    private val nestedTypes = setOf("h-entry", "h-cite")
 
+    /**
+     * Analyzes [parseResult]. [sourceUrl] is the webmention source; nested
+     * responses equal to it are ignored.
+     */
+    fun analyze(
+        parseResult: Mf2ParseResult,
+        sourceUrl: String? = null,
+    ): ReceivedWebmentionAnalysis {
+        val primary = primaryObject(parseResult)
         if (primary == null) {
-            return ReceivedWebmentionAnalysis(interaction = interaction, primary = null)
+            return ReceivedWebmentionAnalysis(interaction = classifyRels(parseResult) ?: MENTION, primary = null)
         }
 
-        val author = extractAuthor(primary)
-        val content = extractContent(primary)
+        val analysis = analyzeObject(primary, classifyProperties(primary) ?: classifyRels(parseResult) ?: MENTION)
+        val seen = listOfNotNull(sourceUrl, analysis.url).map(::normalizeUrl).toMutableSet()
+        val nested = mutableListOf<NestedResponse>()
+        collectNested(primary, analysis.url ?: sourceUrl, 1, seen, nested)
+        return analysis.copy(nested = nested)
+    }
 
+    /** The canonical URL of a microformats object: its first `url`, else its `uid`. */
+    fun canonicalUrl(obj: Mf2Object): String? = obj.firstText("url") ?: obj.firstText("uid")
+
+    /**
+     * The URLs [obj] replies to. A plain value is used as-is; an embedded
+     * reply context (h-cite/h-entry) contributes its canonical URL.
+     */
+    fun inReplyToOf(obj: Mf2Object): List<String> =
+        obj
+            .getProperty("in-reply-to")
+            .mapNotNull { value ->
+                when (value) {
+                    is Mf2Value.Object -> canonicalUrl(value.value)
+                    else -> value.plainTextOrNull
+                }
+            }.map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+
+    /** A URL normalized for matching: no fragment and no trailing slash. */
+    fun normalizeUrl(url: String): String = url.trim().substringBefore('#').trimEnd('/')
+
+    private fun analyzeObject(
+        obj: Mf2Object,
+        interaction: WebmentionInteraction,
+    ): ReceivedWebmentionAnalysis {
+        val author = extractAuthor(obj)
+        val content = extractContent(obj)
         return ReceivedWebmentionAnalysis(
             interaction = interaction,
-            primary = primary,
+            primary = obj,
             authorName = author?.first,
             authorUrl = author?.second,
             authorPhoto = author?.third,
             contentText = content.first,
             contentHtml = content.second,
+            url = canonicalUrl(obj),
+            inReplyTo = inReplyToOf(obj),
         )
+    }
+
+    /**
+     * Walks the responses displayed inside [container] depth first, in
+     * document order. A nested response that declares no `in-reply-to` is
+     * taken to reply to its container. Responses without a URL cannot be keyed
+     * and are skipped along with their subtree.
+     */
+    private fun collectNested(
+        container: Mf2Object,
+        containerUrl: String?,
+        depth: Int,
+        seen: MutableSet<String>,
+        out: MutableList<NestedResponse>,
+    ) {
+        if (depth > MAX_NESTED_DEPTH) return
+        for (candidate in nestedCandidates(container)) {
+            if (out.size >= MAX_NESTED_RESPONSES) return
+            val url = canonicalUrl(candidate) ?: continue
+            if (!seen.add(normalizeUrl(url))) continue
+
+            // A displayed comment with no explicit response property is a reply to what contains it.
+            val analysis = analyzeObject(candidate, classifyProperties(candidate) ?: REPLY)
+            val threaded =
+                if (analysis.inReplyTo.isEmpty() && containerUrl != null) {
+                    analysis.copy(inReplyTo = listOf(containerUrl))
+                } else {
+                    analysis
+                }
+            out += NestedResponse(url, threaded)
+            collectNested(candidate, url, depth + 1, seen, out)
+        }
+    }
+
+    private fun nestedCandidates(container: Mf2Object): List<Mf2Object> {
+        val comments =
+            container
+                .getProperty("comment")
+                .filterIsInstance<Mf2Value.Object>()
+                .map { it.value }
+        val children = container.children.orEmpty().filter { child -> child.type.any { it in nestedTypes } }
+        return comments + children
     }
 
     /**
