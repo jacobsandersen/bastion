@@ -238,9 +238,12 @@ When updating this file, preserve this bar for all agents and keep entries conci
     `in_reply_to`.
   - Nested responses a verified source displays (`comment` values and nested h-entry/h-cite) are stored as their own
     rows with `via_id`. A directly received webmention always wins and is never overwritten by a nested copy.
-  - A row's identity for dedup, takeover, and threading is its source URL plus its `u-url` only when that shares the
-    source's origin (`ReceivedWebmentionAnalyzer.identityUrls`), so a webmention cannot suppress or impersonate another
-    site's response. Tradeoff: a cross-origin proxy reply (Bridgy) that is also displayed nested can appear twice.
+  - A row's identity for dedup, takeover, and deletion is its source URL plus its `u-url` only when that shares the
+    source's origin (`ReceivedWebmentionAnalyzer.identityUrls`), so a webmention cannot suppress another site's
+    response. Tradeoff: a cross-origin proxy reply (Bridgy) that is also displayed nested can appear twice. Threading
+    also indexes cross-origin `u-url`s, but only as lowest-priority fallback keys, so Bridgy reply chains thread while a
+    spoofer can only capture URLs no other row claims; moderation is the future remedy for bad actors. The API exposes
+    `urlSameOrigin` so the frontend can tell a verified `url` from a source's cross-origin claim.
   - `display_fingerprint` survives `ensurePending`. Only a real change in what the post displays enqueues
     `SalmentionService.resendAfterResponseChange`, which runs `reconcile(refresh = true)` to re-ping the post's
     delivered targets upstream. This gate is what stops ping-pong loops.

@@ -3,6 +3,7 @@ package dev.jacobandersen.bastion.webmention.read
 import dev.jacobandersen.bastion.webmention.internal.data.domain.ReceivedWebmention
 import dev.jacobandersen.bastion.webmention.internal.data.domain.WebmentionInteraction
 import dev.jacobandersen.bastion.webmention.internal.data.service.ReceivedWebmentionService
+import dev.jacobandersen.bastion.webmention.internal.service.ReceivedWebmentionAnalyzer
 import dev.jacobandersen.bastion.webmention.internal.service.ThreadedWebmention
 import dev.jacobandersen.bastion.webmention.internal.service.WebmentionThreadResolver
 import org.springframework.stereotype.Service
@@ -59,6 +60,7 @@ class WebmentionReadService(
             firstSeenAt = mention.firstSeenAt,
             verifiedAt = requireNotNull(mention.verifiedAt) { "verified webmention ${mention.id} missing verifiedAt" },
             url = threaded.url,
+            urlSameOrigin = threaded.url?.let { ReceivedWebmentionAnalyzer.sameOrigin(mention.sourceUrl, it) } ?: false,
             inReplyTo = threaded.inReplyTo,
             parentSourceUrl = threaded.parent?.sourceUrl,
             viaSourceUrl = threaded.via?.sourceUrl,

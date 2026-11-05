@@ -17,8 +17,10 @@ data class ThreadedWebmention(
  * that arrive before their parent still thread once the parent is known.
  *
  * A response's parent is the first other response whose source URL or
- * same-origin canonical URL appears in its `in-reply-to`, matched on the exact URL first
- * and then on its page without the fragment. A nested response that names no
+ * canonical URL appears in its `in-reply-to`, matched on the exact URL first
+ * and then on its page without the fragment. A canonical URL on another
+ * origin than its source (such as a Bridgy proxy) is only a fallback key,
+ * used when no source URL or same-origin canonical URL claims it. A nested response that names no
  * known parent falls back to the source that displays it. Nested responses
  * whose displaying source is not shown are hidden, and a reply cycle is broken
  * at its oldest member, which becomes a top-level response; responses that
@@ -35,11 +37,20 @@ object WebmentionThreadResolver {
 
         val byKey = mutableMapOf<String, ReceivedWebmention>()
         val byPage = mutableMapOf<String, ReceivedWebmention>()
+        fun index(
+            mention: ReceivedWebmention,
+            url: String,
+        ) {
+            byKey.putIfAbsent(ReceivedWebmentionAnalyzer.urlKey(url), mention)
+            if ('#' !in url) byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
+        }
         visible.forEach { mention ->
-            ReceivedWebmentionAnalyzer.identityUrls(mention.sourceUrl, urlOf[mention.id]).forEach { url ->
-                byKey.putIfAbsent(ReceivedWebmentionAnalyzer.urlKey(url), mention)
-                if ('#' !in url) byPage.putIfAbsent(ReceivedWebmentionAnalyzer.normalizeUrl(url), mention)
-            }
+            ReceivedWebmentionAnalyzer.identityUrls(mention.sourceUrl, urlOf[mention.id]).forEach { index(mention, it) }
+        }
+        visible.forEach { mention ->
+            urlOf[mention.id]
+                ?.takeUnless { ReceivedWebmentionAnalyzer.sameOrigin(mention.sourceUrl, it) }
+                ?.let { index(mention, it) }
         }
 
         val parentOf = mutableMapOf<UUID, ReceivedWebmention?>()

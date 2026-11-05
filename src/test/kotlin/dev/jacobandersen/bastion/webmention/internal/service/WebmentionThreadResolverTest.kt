@@ -213,4 +213,35 @@ class WebmentionThreadResolverTest {
 
         assertEquals(carol, threaded.parentOf(dave))
     }
+
+    @Test
+    fun `threads a Bridgy reply chain through cross-origin u-urls`() {
+        val bobMastodon = "https://mastodon.social/@bob/1"
+        val bobBridgy = "https://brid.gy/comment/mastodon/alice/1/bob"
+        val carolBridgy = "https://brid.gy/comment/mastodon/alice/1/carol"
+        val threaded =
+            WebmentionThreadResolver.resolve(
+                listOf(
+                    mention(bobBridgy, listOf(alice), seenAt = 1, url = bobMastodon),
+                    mention(carolBridgy, listOf(alice, bobMastodon), seenAt = 2, url = "https://mastodon.social/@carol/2"),
+                ),
+            )
+
+        assertEquals(bobBridgy, threaded.parentOf(carolBridgy))
+    }
+
+    @Test
+    fun `an older cross-origin u-url does not displace the response that owns the url`() {
+        val dave = "https://dave.example/r/1"
+        val threaded =
+            WebmentionThreadResolver.resolve(
+                listOf(
+                    mention("https://mallory.example/fake", listOf(alice), seenAt = 0, url = "$carol/"),
+                    mention(carol, listOf(alice), seenAt = 5),
+                    mention(dave, listOf("$carol#reply"), seenAt = 6),
+                ),
+            )
+
+        assertEquals(carol, threaded.parentOf(dave))
+    }
 }

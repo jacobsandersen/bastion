@@ -132,7 +132,8 @@ object ReceivedWebmentionAnalyzer {
         url: String?,
     ): List<String> = listOfNotNull(sourceUrl, url?.takeIf { sameOrigin(sourceUrl, it) })
 
-    private fun sameOrigin(
+    /** Whether [a] and [b] share a scheme, case-insensitive host and port. */
+    fun sameOrigin(
         a: String,
         b: String,
     ): Boolean {

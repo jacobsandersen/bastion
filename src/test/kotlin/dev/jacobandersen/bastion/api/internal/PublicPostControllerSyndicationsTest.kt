@@ -99,6 +99,7 @@ class PublicPostControllerSyndicationsTest {
                 firstSeenAt = Instant.parse("2026-01-03T00:00:00Z"),
                 verifiedAt = Instant.parse("2026-01-03T00:00:00Z"),
                 url = null,
+                urlSameOrigin = false,
                 inReplyTo = emptyList(),
                 parentSourceUrl = null,
                 viaSourceUrl = null,
