@@ -19,7 +19,7 @@ enum class MicrosubScope {
     val wireName: String get() = name.lowercase()
 
     companion object {
-        fun fromWire(scope: String): MicrosubScope? = entries.find { it.wireName == scope.lowercase() }
+        fun fromWire(scope: String): MicrosubScope? = entries.find { it.wireName == scope }
     }
 }
 

@@ -11,7 +11,8 @@ import java.util.UUID
 
 /**
  * Microsub channels. `notifications` always exists, always sorts first and
- * cannot be deleted or reordered. Renaming never changes a uid, which the
+ * cannot be deleted or reordered, and at least one other channel always
+ * remains (the spec requires both). Renaming never changes a uid, which the
  * spec allows (a server MAY change it and MUST return it). Deleting a channel
  * releases the WebSub subscriptions its feeds no longer need.
  */
@@ -33,8 +34,13 @@ class ChannelService(
     @Transactional(readOnly = true)
     fun require(uid: String?): Channel {
         if (uid.isNullOrBlank()) throw MicrosubError.invalidRequest("The 'channel' parameter is required")
-        return repository.findByUid(uid) ?: throw MicrosubError.notFound("Channel '$uid' does not exist")
+        return repository.findByUid(uid) ?: throw MicrosubError.invalidRequest("Channel '$uid' does not exist")
     }
+
+    /** The uid of the first channel after `notifications`, used when a timeline request names none. */
+    @Transactional(readOnly = true)
+    fun defaultUid(): String =
+        ordered().firstOrNull { it.uid != NOTIFICATIONS }?.uid ?: throw MicrosubError.invalidRequest("There is no channel to read")
 
     /** The channel id for [uid], or null for `global`. */
     @Transactional(readOnly = true)
@@ -67,6 +73,9 @@ class ChannelService(
     fun delete(uid: String?) {
         val channel = require(uid)
         if (channel.uid == NOTIFICATIONS) throw MicrosubError.invalidRequest("The notifications channel cannot be deleted")
+        if (repository.list().count { it.uid != NOTIFICATIONS } <= 1) {
+            throw MicrosubError.invalidRequest("At least one channel besides notifications must remain")
+        }
         val subscriptions = feeds.listByChannel(channel.id).mapNotNull { it.subscriptionId }.distinct()
         repository.delete(channel.id)
         subscriptions.forEach(refresh::releaseSubscription)

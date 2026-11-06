@@ -14,15 +14,22 @@ import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.CHANNE
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.FOLLOW
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.MUTE
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.READ
+import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.util.MultiValueMap
+import org.springframework.web.ErrorResponse
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestMethod
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * The single Microsub endpoint. Requests are RPC-style: `action` (and for
@@ -52,7 +59,9 @@ class MicrosubController(
 
                 "timeline" -> {
                     require(READ)
-                    timeline.timeline(p.one("channel"), p.page(), p.all("source"))
+                    // The spec's own paging example omits `channel` ("the default channel").
+                    val channel = if (p.has("channel")) p.one("channel") else channels.defaultUid()
+                    timeline.timeline(channel, p.page(), p.all("source"))
                 }
 
                 "follow" -> {
@@ -154,7 +163,8 @@ class MicrosubController(
             }
 
             null -> {
-                val channel = p.one("channel")?.let { channels.rename(it, p.one("name")) } ?: channels.create(p.one("name"))
+                // A present-but-blank `channel` is an update of an unknown channel, not a create.
+                val channel = if (p.has("channel")) channels.rename(p.one("channel"), p.one("name")) else channels.create(p.one("name"))
                 mapOf("uid" to channel.uid, "name" to channel.name)
             }
 
@@ -189,7 +199,8 @@ class MicrosubController(
     }
 
     private fun search(p: Params): Any =
-        if (p.one("channel") == null) {
+        // The presence of `channel` (even blank) makes this a content search.
+        if (!p.has("channel")) {
             discovery.searchFeeds(p.one("query"))
         } else {
             timeline.search(
@@ -217,13 +228,38 @@ class MicrosubController(
         if (scope !in auth.scopes) throw MicrosubError.insufficientScope(scope.wireName)
     }
 
+    /** Methods the endpoint does not serve get the Micropub error shape instead of the framework's default body. */
+    @RequestMapping(method = [RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE])
+    fun unsupportedMethod(): ResponseEntity<Map<String, String>> =
+        ResponseEntity
+            .status(HttpStatus.METHOD_NOT_ALLOWED)
+            .header(HttpHeaders.ALLOW, "GET, HEAD, POST, OPTIONS")
+            .body(MicrosubError.invalidRequest("Only GET and POST are supported").body())
+
     @ExceptionHandler(MicrosubError::class)
     fun handle(error: MicrosubError): ResponseEntity<Map<String, String>> = ResponseEntity.status(error.status).body(error.body())
+
+    /** Anything else keeps the `error`/`error_description` shape: framework 4xx errors map to `invalid_request`. */
+    @ExceptionHandler(Exception::class)
+    fun handleUnexpected(error: Exception): ResponseEntity<Map<String, String>> {
+        if (error is ErrorResponse && error.statusCode.is4xxClientError) {
+            val body =
+                MicrosubError(HttpStatus.valueOf(error.statusCode.value()), "invalid_request", error.body.detail ?: "Invalid request")
+            return ResponseEntity.status(body.status).headers(error.headers).body(body.body())
+        }
+        logger.error(error) { "Unexpected error handling a Microsub request" }
+        return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(mapOf("error" to "server_error", "error_description" to "The request could not be processed"))
+    }
 
     /** Request parameters, reading both `name` and the PHP-style `name[]` for list values. */
     private class Params(
         private val params: MultiValueMap<String, String>,
     ) {
+        /** Whether the parameter was sent at all, even blank. */
+        fun has(name: String): Boolean = params.containsKey(name) || params.containsKey("$name[]")
+
         fun one(name: String): String? = params.getFirst(name)?.trim()?.takeIf { it.isNotEmpty() }
 
         fun all(name: String): List<String> =

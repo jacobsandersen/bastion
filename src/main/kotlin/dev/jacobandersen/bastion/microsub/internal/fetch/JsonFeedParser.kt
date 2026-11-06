@@ -67,7 +67,7 @@ object JsonFeedParser {
                 this["uid"] = text(node, "id")
                 this["name"] = text(node, "title")
                 this["summary"] = text(node, "summary")
-                this["published"] = (text(node, "date_published") ?: text(node, "date_modified"))?.let(::iso)
+                this["published"] = listOf("date_published", "date_modified").firstNotNullOfOrNull { text(node, it)?.let(::iso) }
                 this["updated"] = text(node, "date_modified")?.let(::iso)
                 this["content"] = content
                 this["author"] = authorOf(node, base) ?: feedAuthor.takeIf { it.size > 1 }
@@ -94,7 +94,7 @@ object JsonFeedParser {
         }.takeIf { it.size > 1 }
     }
 
-    private fun iso(value: String): String = Jf2Item.parseInstant(value)?.let(Jf2Item::formatInstant) ?: value
+    private fun iso(value: String): String? = Jf2Item.parseInstant(value)?.let(Jf2Item::formatInstant)
 
     private fun text(
         node: JsonNode,

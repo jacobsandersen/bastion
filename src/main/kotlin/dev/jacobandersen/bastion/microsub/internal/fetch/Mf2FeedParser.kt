@@ -85,8 +85,8 @@ object Mf2FeedParser {
                 this["uid"] = obj.firstText("uid")
                 this["name"] = name
                 this["summary"] = obj.firstText("summary")?.takeUnless { it == contentText }
-                this["published"] = obj.firstText("published")?.let(::isoOrRaw)
-                this["updated"] = obj.firstText("updated")?.let(::isoOrRaw)
+                this["published"] = obj.firstText("published")?.let(::iso)
+                this["updated"] = obj.firstText("updated")?.let(::iso)
                 this["start"] = obj.firstText("start")
                 this["end"] = obj.firstText("end")
                 this["content"] = content
@@ -125,7 +125,8 @@ object Mf2FeedParser {
 
     private fun squash(text: String) = text.replace(Regex("\\s+"), " ").trim()
 
-    private fun isoOrRaw(value: String): String = Jf2Item.parseInstant(value)?.let(Jf2Item::formatInstant) ?: value
+    /** An ISO 8601 UTC timestamp, or null: `published` and `updated` must never carry an unparsed string. */
+    private fun iso(value: String): String? = Jf2Item.parseInstant(value)?.let(Jf2Item::formatInstant)
 
     fun author(
         value: Mf2Value,

@@ -46,7 +46,8 @@ class DiscoveryService(
                             this["photo"] = load.feed.photo
                             this["description"] = load.feed.description
                         },
-                    "items" to load.feed.items.map { it.data },
+                    "items" to load.feed.items.map { it.data + ("_is_read" to false) },
+                    "paging" to emptyMap<String, Any>(),
                 )
             }
 

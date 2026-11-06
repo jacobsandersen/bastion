@@ -13,7 +13,9 @@ import tools.jackson.databind.ObjectMapper
 
 /**
  * Authenticates Microsub requests with a Bastion-issued access token from the
- * `Authorization: Bearer` header or the `access_token` parameter (not both).
+ * `Authorization: Bearer` header or the `access_token` field of a form-encoded
+ * POST body (not both). A token in the URL query string is never accepted, as
+ * URLs end up in logs and referrers.
  * Missing token: 401; unknown or expired token: 403. Per-action scope checks
  * happen in the controller because the scope depends on `action`.
  */
@@ -32,7 +34,7 @@ class MicrosubAuthenticationFilter(
         }
 
         val header = request.getHeader(HttpHeaders.AUTHORIZATION)?.takeIf { it.isNotBlank() }
-        val param = request.getParameter("access_token")?.takeIf { it.isNotBlank() }
+        val param = bodyToken(request)
         val token =
             when {
                 header != null && param != null -> {
@@ -66,6 +68,13 @@ class MicrosubAuthenticationFilter(
         filterChain.doFilter(request, response)
     }
 
+    private fun bodyToken(request: HttpServletRequest): String? {
+        val form = request.method == "POST" && request.contentType?.startsWith(FORM, ignoreCase = true) == true
+        val inQuery = request.queryString?.split('&')?.any { it.substringBefore('=') == "access_token" } == true
+        if (!form || inQuery) return null
+        return request.getParameter("access_token")?.takeIf { it.isNotBlank() }
+    }
+
     private fun write(
         response: HttpServletResponse,
         error: MicrosubError,
@@ -76,5 +85,9 @@ class MicrosubAuthenticationFilter(
         }
         response.contentType = MediaType.APPLICATION_JSON_VALUE
         objectMapper.writeValue(response.outputStream, error.body())
+    }
+
+    private companion object {
+        const val FORM = "application/x-www-form-urlencoded"
     }
 }

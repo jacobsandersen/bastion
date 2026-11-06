@@ -67,4 +67,19 @@ class Mf2FeedParserTest {
         assertTrue(Mf2FeedParser.hasEntries(result))
         assertEquals(1, Mf2FeedParser.parse(result, page, null).items.size)
     }
+
+    @Test
+    fun `drops dates it cannot parse instead of passing them through`() {
+        val doc =
+            """
+            <article class="h-entry"><p class="p-name e-content">Dated</p><a class="u-url" href="/n">x</a>
+            <time class="dt-published" datetime="sometime last week">d</time>
+            <time class="dt-updated" datetime="2026-11-02T10:00:00+02:00">d</time></article>
+            """.trimIndent()
+        val item = Mf2FeedParser.parse(parser.parse(doc, page), page, null).items.single()
+
+        assertFalse(item.data.containsKey("published"))
+        assertNull(item.published)
+        assertEquals("2026-11-02T08:00:00Z", item.data["updated"])
+    }
 }

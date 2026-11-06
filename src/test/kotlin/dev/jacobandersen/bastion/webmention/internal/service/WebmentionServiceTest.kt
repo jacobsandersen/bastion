@@ -14,15 +14,18 @@ import dev.jacobandersen.bastion.webmention.internal.data.service.WebmentionNoti
 import dev.jacobandersen.bastion.webmention.internal.http.EndpointDiscovery
 import dev.jacobandersen.bastion.webmention.internal.http.SendWebmentionResult
 import dev.jacobandersen.bastion.webmention.internal.http.WebmentionHttpClient
+import dev.jacobandersen.bastion.webmention.policy.OutboundWebmentionPolicy
 import dev.jacobandersen.microformats2.Mf2Object
 import dev.jacobandersen.microformats2.Mf2Value
 import org.jobrunr.scheduling.JobScheduler
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
 import org.mockito.kotlin.any
 import java.time.Instant
@@ -298,5 +301,126 @@ class WebmentionServiceTest {
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.anyString(),
         )
+    }
+
+    // --- outbound policy (blocked users) -----------------------------------------------------------------------------
+
+    private val suppressedHosts = mutableSetOf<String>()
+    private val suppressed = "https://blocked.example/post"
+
+    private val policed =
+        WebmentionService(
+            jobScheduler,
+            notificationService,
+            endpointCacheService,
+            httpClient,
+            config,
+            contentUrlMatcher,
+            listOf(OutboundWebmentionPolicy { url -> suppressedHosts.any { url.contains("//$it/") } }),
+        )
+
+    @BeforeEach
+    fun suppressBlockedExample() {
+        suppressedHosts.clear()
+        suppressedHosts += "blocked.example"
+    }
+
+    @Test
+    fun `policy keeps new suppressed targets from being recorded or sent`() {
+        policed.reconcile(post(content = "see $target and $suppressed"), refresh = true)
+
+        verify(notificationService, times(1)).setActivePending(source, target, postId)
+        verify(notificationService, never()).setActivePending(source, suppressed, postId)
+    }
+
+    @Test
+    fun `policy leaves a delivered webmention to a suppressed target alone on refresh`() {
+        `when`(notificationService.notificationsByPostId(postId)).thenReturn(listOf(notification(suppressed)))
+
+        policed.reconcile(post(content = "see $suppressed"), refresh = true)
+
+        verify(notificationService, never()).setActivePending(source, suppressed, postId)
+        verify(notificationService, never()).markInactivePendingRetraction(source, suppressed)
+        verify(notificationService, never()).markInactiveSilent(source, suppressed)
+        verifyNoInteractions(jobScheduler)
+    }
+
+    @Test
+    fun `policy never retracts from a suppressed target when the link is removed`() {
+        `when`(notificationService.notificationsByPostId(postId)).thenReturn(listOf(notification(suppressed)))
+
+        policed.reconcile(post(content = "see $target"), refresh = true)
+
+        verify(notificationService, never()).markInactivePendingRetraction(source, suppressed)
+        verify(notificationService, times(1)).markInactiveSilent(source, suppressed)
+        verify(notificationService, times(1)).setActivePending(source, target, postId)
+    }
+
+    @Test
+    fun `policy never retracts from a suppressed target when the post is deleted`() {
+        `when`(notificationService.notificationsByPostId(postId)).thenReturn(listOf(notification(suppressed)))
+
+        policed.reconcile(post(content = "see $suppressed", deleted = true), refresh = false)
+
+        verify(notificationService, never()).markInactivePendingRetraction(source, suppressed)
+        verify(notificationService, times(1)).markInactiveSilent(source, suppressed)
+        verifyNoInteractions(jobScheduler)
+    }
+
+    @Test
+    fun `policy stops an undelivered pending webmention to a suppressed target`() {
+        `when`(notificationService.notificationsByPostId(postId))
+            .thenReturn(listOf(notification(suppressed, delivered = false)))
+
+        policed.reconcile(post(content = "see $suppressed"), refresh = false)
+
+        verify(notificationService, times(1)).markInactiveSilent(source, suppressed)
+        verify(notificationService, never()).setActivePending(source, suppressed, postId)
+        verifyNoInteractions(jobScheduler)
+    }
+
+    @Test
+    fun `policy leaves other targets of the same post untouched`() {
+        `when`(notificationService.notificationsByPostId(postId))
+            .thenReturn(listOf(notification(suppressed), notification(target)))
+
+        policed.reconcile(post(content = "see $target and $suppressed"), refresh = true)
+
+        verify(notificationService, times(1)).setActivePending(source, target, postId)
+        verify(notificationService, never()).setActivePending(source, suppressed, postId)
+    }
+
+    @Test
+    fun `policy resumes sending once the target is no longer suppressed`() {
+        `when`(notificationService.notificationsByPostId(postId)).thenReturn(listOf(notification(suppressed)))
+        policed.reconcile(post(content = "see $suppressed"), refresh = true)
+        verify(notificationService, never()).setActivePending(source, suppressed, postId)
+
+        suppressedHosts.clear()
+        policed.reconcile(post(content = "see $suppressed"), refresh = true)
+
+        verify(notificationService, times(1)).setActivePending(source, suppressed, postId)
+    }
+
+    @Test
+    fun `policy stops a send that was queued before the target became suppressed`() {
+        policed.sendWebmention(source, suppressed)
+
+        verifyNoInteractions(httpClient)
+        verifyNoInteractions(endpointCacheService)
+        verify(notificationService, times(1)).recordFailure(source, suppressed, null, "target suppressed by policy")
+        verify(notificationService, times(1)).scheduleNextAttempt(source, suppressed, null)
+    }
+
+    @Test
+    fun `policy does not affect sends to other targets`() {
+        `when`(endpointCacheService.lookup(org.mockito.kotlin.eq(target), any()))
+            .thenReturn(EndpointCacheResult.Fresh("https://example.com/webmention"))
+        `when`(httpClient.sendWebmention(source, target, "https://example.com/webmention"))
+            .thenReturn(SendWebmentionResult.Success(202))
+
+        policed.sendWebmention(source, target)
+
+        verify(notificationService, times(1)).recordSuccess(source, target, 202)
     }
 }

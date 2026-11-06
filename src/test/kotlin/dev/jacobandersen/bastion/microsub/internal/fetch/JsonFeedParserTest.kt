@@ -36,4 +36,26 @@ class JsonFeedParserTest {
     fun `ignores JSON that is not a JSON Feed`() {
         assertNull(JsonFeedParser.parse(mapper, """{"hello":"world"}""".toByteArray(), "https://x.example/", 50))
     }
+
+    @Test
+    fun `never emits an unparsed date and falls back to date_modified`() {
+        fun item(fields: String) =
+            JsonFeedParser
+                .parse(
+                    mapper,
+                    """{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"1","url":"https://x.example/1",$fields}]}"""
+                        .toByteArray(),
+                    "https://x.example/feed.json",
+                    50,
+                )!!
+                .items
+                .single()
+
+        val fallback = item(""""content_text":"a","date_published":"yesterday-ish","date_modified":"2026-11-03T08:00:00Z"""")
+        assertEquals("2026-11-03T08:00:00Z", fallback.data["published"])
+
+        val none = item(""""content_text":"a","date_published":"yesterday-ish","date_modified":"also bad"""")
+        assertNull(none.data["published"])
+        assertNull(none.data["updated"])
+    }
 }

@@ -50,6 +50,18 @@ class ModerationRepository(
             .update()
     }
 
+    /** Removes [url]'s [kind] rows from every channel and from `global`. */
+    fun removeEverywhere(
+        url: String,
+        kind: ModerationKind,
+    ) {
+        jdbc
+            .sql("delete from microsub_moderation where url = :url and kind = :kind")
+            .param("url", url)
+            .param("kind", kind.name)
+            .update()
+    }
+
     fun list(
         channelId: UUID?,
         kind: ModerationKind,
@@ -58,6 +70,14 @@ class ModerationRepository(
             .sql("select url from microsub_moderation where channel_id is not distinct from :channel and kind = :kind order by created_at")
             .param("channel", channelId)
             .param("kind", kind.name)
+            .query(String::class.java)
+            .list()
+            .filterNotNull()
+
+    /** Every URL blocked in any channel or globally. */
+    fun blockedUrls(): List<String> =
+        jdbc
+            .sql("select distinct url from microsub_moderation where kind = 'BLOCK'")
             .query(String::class.java)
             .list()
             .filterNotNull()
