@@ -50,8 +50,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
   adapter does not merge the document itself.
 - `indieauth` exposes `indieauth::indieauth-token-query` and `indieauth::indieauth-scopes`. `AccessTokenQueryService`
   resolves only tokens for the configured Bastion identity. Token exchange/refresh/revocation commands stay internal.
-- `webmention` exposes `webmention::webmention-read` and `webmention::webmention-events`
-  (`ReceivedWebmentionChangedEvent`). Inbound and outbound commands stay internal. It uses
+- `webmention` exposes `webmention::webmention-read`, `webmention::webmention-events`
+  (`ReceivedWebmentionChangedEvent`), and `webmention::webmention-policy`. Inbound and outbound commands stay internal. It uses
   `url::ContentUrlMatcher` for own-content checks, not `post::post-url`.
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
