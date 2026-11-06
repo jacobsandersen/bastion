@@ -408,7 +408,7 @@ class WebmentionServiceTest {
 
         verifyNoInteractions(httpClient)
         verifyNoInteractions(endpointCacheService)
-        verify(notificationService, times(1)).recordFailure(source, suppressed, null, "target suppressed by policy")
+        verify(notificationService, never()).recordFailure(any(), any(), any(), any())
         verify(notificationService, times(1)).scheduleNextAttempt(source, suppressed, null)
     }
 

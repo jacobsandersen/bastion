@@ -128,7 +128,7 @@ class WebmentionService(
 
         if (isSuppressed(targetUrl)) {
             logger.info { "Skipping webmention to suppressed target $targetUrl" }
-            recordTerminalFailure(sourceUrl, targetUrl, "target suppressed by policy")
+            notificationService.scheduleNextAttempt(sourceUrl, targetUrl, null)
             return
         }
 
