@@ -2,6 +2,7 @@ package dev.jacobandersen.bastion.microsub.internal.entry
 
 import dev.jacobandersen.bastion.microsub.internal.channel.ChannelService
 import dev.jacobandersen.bastion.microsub.internal.config.MicrosubConfig
+import dev.jacobandersen.bastion.microsub.internal.jf2.Jf2Item
 import dev.jacobandersen.bastion.microsub.internal.jf2.MicrosubUrls
 import dev.jacobandersen.bastion.microsub.internal.web.MicrosubError
 import org.springframework.stereotype.Service
@@ -17,11 +18,12 @@ data class PageRequest(
 )
 
 /**
- * Timelines and content search (spec sections 5 and 7). Pages are newest
- * first. `before` is returned whenever items are, and `after` only when
- * older items remain, as the paging rules require. A `before`-only page holds
- * the entries just newer than the cursor, so nothing older than it remains
- * unseen and it carries no `after`.
+ * Timelines and content search. Pages are always newest first. `before` is
+ * returned whenever items are, and `after` whenever more matching items were
+ * not returned, as the spec's paging rules require. That includes a
+ * `before`-only poll that finds more new entries than fit in one page: it
+ * returns the newest page, and the client closes the gap with the original
+ * `before` plus the returned `after`.
  */
 @Service
 class TimelineService(
@@ -53,6 +55,7 @@ class TimelineService(
         sources: List<String>,
     ): Map<String, Any> {
         val channelId = channels.requireOrGlobal(channelUid)
+        val requestedAuthors = authors.map(String::trim).filter(String::isNotEmpty)
         val query =
             EntryQuery(
                 channelIds = channelId?.let(::listOf),
@@ -61,14 +64,20 @@ class TimelineService(
                 limit = limit(page.limit),
                 sources = normalizeSources(sources),
                 queries = queries.map(String::trim).filter(String::isNotEmpty),
-                authors = authors.mapNotNull(MicrosubUrls::fromUserInput),
+                authors = requestedAuthors.mapNotNull(MicrosubUrls::fromUserInput),
                 categories = categories.map(String::trim).filter(String::isNotEmpty),
                 kinds = kinds.map { it.trim().lowercase() }.filter(String::isNotEmpty),
             )
-        if (query.queries.isEmpty() && query.authors.isEmpty() && query.categories.isEmpty() && query.kinds.isEmpty() &&
+        if (query.queries.isEmpty() && requestedAuthors.isEmpty() && query.categories.isEmpty() && query.kinds.isEmpty() &&
             query.sources.isEmpty()
         ) {
             throw MicrosubError.invalidRequest("Search needs at least one of query, author, category, kind or source")
+        }
+        // Filters are ANDed: an author filter with no usable profile URL can match nothing, not everything.
+        if (requestedAuthors.isNotEmpty() &&
+            query.authors.isEmpty()
+        ) {
+            return mapOf("items" to emptyList<Any>(), "paging" to emptyMap<String, Any>())
         }
         return render(page, query)
     }
@@ -107,12 +116,11 @@ class TimelineService(
         query: EntryQuery,
     ): Map<String, Any> {
         val rows = entries.page(query)
-        val page = rows.take(query.limit)
-        val items = if (query.ascending) page.reversed() else page
+        val items = rows.take(query.limit)
         val paging =
             buildMap {
                 items.firstOrNull()?.let { put("before", it.cursor.encode()) }
-                if (!query.ascending && rows.size > query.limit) put("after", items.last().cursor.encode())
+                if (rows.size > query.limit) put("after", items.last().cursor.encode())
             }
         return mapOf("items" to items.map(::serve), "paging" to paging)
     }
@@ -121,6 +129,8 @@ class TimelineService(
         LinkedHashMap(row.data).apply {
             put("_id", row.id.toString())
             put("_is_read", row.isRead)
+            // Undated entries are ordered by when they were first seen; expose that so every entry carries `published`.
+            if (!containsKey("published")) put("published", Jf2Item.formatInstant(row.published))
             row.source?.let { source ->
                 put(
                     "_source",
@@ -152,7 +162,8 @@ class TimelineService(
             .flatMap { listOfNotNull(it, MicrosubUrls.normalize(it)) }
             .distinct()
 
-    private fun ids(values: List<String>): List<UUID> = values.mapNotNull(::parseId)
+    private fun ids(values: List<String>): List<UUID> =
+        values.map { parseId(it) ?: throw MicrosubError.invalidRequest("Unknown entry '$it'") }
 
     private fun parseId(value: String): UUID? = runCatching { UUID.fromString(value.trim()) }.getOrNull()
 }

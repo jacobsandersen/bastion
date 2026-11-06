@@ -6,7 +6,8 @@ import org.springframework.modulith.PackageInfo
 /**
  * Microsub server (https://indieweb.org/Microsub-spec): follows feeds for the
  * configured Bastion identity and serves channels and timelines to reader
- * clients. No public surface.
+ * clients. No public surface. It contributes an `OutboundWebmentionPolicy` so
+ * blocked users are not sent webmentions.
  */
 @PackageInfo
 @ApplicationModule(
@@ -14,7 +15,7 @@ import org.springframework.modulith.PackageInfo
     allowedDependencies = [
         "indieauth::indieauth-token-query", "indieauth::indieauth-scopes",
         "websub::websub-subscription", "websub::websub-events",
-        "webmention::webmention-events", "webmention::webmention-read",
+        "webmention::webmention-events", "webmention::webmention-read", "webmention::webmention-policy",
         "config::config-security", "util",
     ],
 )

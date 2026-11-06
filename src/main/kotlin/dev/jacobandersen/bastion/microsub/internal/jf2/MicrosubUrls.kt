@@ -19,6 +19,18 @@ object MicrosubUrls {
     }
 
     /**
+     * The site a URL belongs to, as `host` plus any non-default port, lowercase.
+     * The scheme is deliberately left out so `http://` and `https://` forms of
+     * one site compare equal. Returns null for anything that is not an
+     * absolute http(s) URL.
+     */
+    fun site(url: String): String? {
+        val normalized = normalize(url) ?: return null
+        val uri = URI(normalized)
+        return "${uri.host}${uri.port.takeUnless { it == -1 }?.let { ":$it" }.orEmpty()}"
+    }
+
+    /**
      * Turns what a user typed into a URL: absolute http(s) URLs pass through,
      * a bare host or host/path gets `https://` and must have a dotted host.
      * Returns null for anything else.

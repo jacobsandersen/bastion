@@ -46,8 +46,13 @@ class ModerationService(
         url: String?,
         kind: ModerationKind,
     ) {
-        val channelId = channels.requireOrGlobal(channelUid)
-        repository.remove(channelId, normalize(url), kind)
+        val author = normalize(url)
+        // The spec has `global` undo the mute or block "in every channel", not only a global one.
+        if (channelUid == ChannelService.GLOBAL) {
+            repository.removeEverywhere(author, kind)
+        } else {
+            repository.remove(channels.requireOrGlobal(channelUid), author, kind)
+        }
     }
 
     private fun normalize(url: String?): String =

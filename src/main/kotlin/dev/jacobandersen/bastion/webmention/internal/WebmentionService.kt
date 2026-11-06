@@ -14,6 +14,7 @@ import dev.jacobandersen.bastion.webmention.internal.http.SendWebmentionResult
 import dev.jacobandersen.bastion.webmention.internal.http.WebmentionHttpClient
 import dev.jacobandersen.bastion.webmention.internal.util.Mf2TextExtractor
 import dev.jacobandersen.bastion.webmention.internal.util.WebmentionUtil
+import dev.jacobandersen.bastion.webmention.policy.OutboundWebmentionPolicy
 import dev.jacobandersen.microformats2.Mf2Object
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jobrunr.scheduling.JobScheduler
@@ -30,6 +31,7 @@ class WebmentionService(
     private val httpClient: WebmentionHttpClient,
     private val config: WebmentionConfig,
     private val contentUrlMatcher: ContentUrlMatcher,
+    private val policies: List<OutboundWebmentionPolicy> = emptyList(),
 ) {
     /**
      * Reconciles the outbound webmention notification state for a post against
@@ -47,7 +49,8 @@ class WebmentionService(
     ) {
         val currentUrl = post.url
         val isReachable = post.publiclyReachable
-        val currentTargets = if (isReachable) targetUrlsOf(post.post) else emptySet()
+        val linkedTargets = if (isReachable) targetUrlsOf(post.post) else emptySet()
+        val currentTargets = linkedTargets.filterNot(::isSuppressed).toSet()
         val retractDelivered = isReachable || post.deleted
 
         val existing =
@@ -58,8 +61,16 @@ class WebmentionService(
 
         existing.forEach { notification ->
             val sourceMatches = notification.sourceUrl == currentUrl
-            val targetStillLinked = notification.targetUrl in currentTargets
+            val targetStillLinked = notification.targetUrl in linkedTargets
             val remainsDesired = isReachable && sourceMatches && targetStillLinked
+
+            if (isSuppressed(notification.targetUrl)) {
+                // Never contact a suppressed target, not even to retract. Something already delivered stays as it is.
+                if (!(remainsDesired && notification.delivered)) {
+                    notificationService.markInactiveSilent(notification.sourceUrl, notification.targetUrl)
+                }
+                return@forEach
+            }
 
             if (!remainsDesired) {
                 if (retractDelivered && notification.delivered) {
@@ -115,6 +126,12 @@ class WebmentionService(
             return
         }
 
+        if (isSuppressed(targetUrl)) {
+            logger.info { "Skipping webmention to suppressed target $targetUrl" }
+            notificationService.scheduleNextAttempt(sourceUrl, targetUrl, null)
+            return
+        }
+
         if (HttpUtil.isBlockedHost(targetUrl, failClosedOnDnsError = false)) {
             logger.info { "Skipping webmention to blocked target $targetUrl" }
             recordTerminalFailure(sourceUrl, targetUrl, "target URL resolves to a blocked address")
@@ -154,6 +171,8 @@ class WebmentionService(
             }
         }
     }
+
+    private fun isSuppressed(targetUrl: String): Boolean = policies.any { it.isSuppressed(targetUrl) }
 
     internal fun targetUrlsOf(obj: Mf2Object): Set<String> {
         val urls = UrlExtractor.distinctUrls(Mf2TextExtractor.extractText(obj))

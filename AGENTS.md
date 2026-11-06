@@ -50,8 +50,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
   adapter does not merge the document itself.
 - `indieauth` exposes `indieauth::indieauth-token-query` and `indieauth::indieauth-scopes`. `AccessTokenQueryService`
   resolves only tokens for the configured Bastion identity. Token exchange/refresh/revocation commands stay internal.
-- `webmention` exposes `webmention::webmention-read` and `webmention::webmention-events`
-  (`ReceivedWebmentionChangedEvent`). Inbound and outbound commands stay internal. It uses
+- `webmention` exposes `webmention::webmention-read`, `webmention::webmention-events`
+  (`ReceivedWebmentionChangedEvent`), and `webmention::webmention-policy`. Inbound and outbound commands stay internal. It uses
   `url::ContentUrlMatcher` for own-content checks, not `post::post-url`.
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
@@ -285,9 +285,29 @@ When updating this file, preserve this bar for all agents and keep entries conci
   shared per (topic, hub), so unsubscribe only when no feed row still references the subscription. A content delivery
   only triggers a re-fetch; the pushed body is never ingested. Bastion requests leases via
   `bastion.websub.subscriber.*`, and `websub-subscription-renewal` renews them.
-- Paging: an opaque cursor over `(published desc, id desc)` (`entry/Cursor.kt`). `before` is returned only when
-  items are, and `after` only when more remain. Undated entries keep their first-seen time; future dates are clamped
-  to now.
+- Paging: an opaque cursor over `(published desc, id desc)` (`entry/Cursor.kt`). Pages are always newest first,
+  including `before`-only polls: those return the newest page and an `after` when more new entries exist (the spec's
+  worked example), never the entries nearest the cursor. `before` is returned only when items are, and `after`
+  whenever more matching items were not returned. Undated entries keep their first-seen time and are served with it
+  as `published`; future dates are clamped to now. Unparseable `published`/`updated` values are dropped, never passed
+  through.
+- Spec-pedantry decisions (all tested): `channel=global` on `unmute`/`unblock` removes the mute/block in every
+  channel; the last channel besides `notifications` cannot be deleted; a bad channel is 400 `invalid_request` (the
+  Micropub error format has no `not_found`); preview answers in timeline shape (`items` + empty `paging`,
+  `_is_read: false`); an `author` filter with no usable URL matches nothing; a present-but-blank `channel` is not
+  absent; `access_token` is accepted only in a form-encoded POST body, never the query string; scope names match
+  exactly; a timeline request with no `channel` reads the first channel after `notifications`; non-`MicrosubError`
+  failures keep the `error`/`error_description` shape (405 for PUT/PATCH/DELETE, `server_error` for 500).
+- Blocks and outbound webmentions: `webmention::webmention-policy` exposes `OutboundWebmentionPolicy`, implemented by
+  Microsub's `BlockWebmentionPolicy`. A suppressed target gets no new webmentions, no refreshes (so no Salmention
+  follow-ups) and no retractions, because each would notify the blocked user; webmentions already delivered stay.
+  `WebmentionService` checks at reconcile time and again in `sendWebmention`, so jobs queued before a block are
+  stopped too. The spec does not say how a block (profile URL, optionally per channel) maps to a webmention target
+  (post URL), so these interpretations were chosen to err toward silence: match by site (host plus non-default port,
+  either scheme), so on shared hosts like `example.com/~alice` blocking one blocks both; a block in any channel or
+  `global` suppresses, since a webmention has no channel; unblocking resumes sending at the post's next reconcile,
+  not immediately. Mutes never suppress. Received webmentions from a blocked author still show on the public API;
+  only the `notifications` mirror drops them.
 - Mutes hide entries at query time; blocks also delete stored entries and drop new ones at ingest. Received
   webmentions mirror into `notifications` through `ReceivedWebmentionChangedEvent`; the listener reloads state with
   `WebmentionReadService.receivedById` and deletes the entry once the webmention is gone (missing, rejected, deleted,

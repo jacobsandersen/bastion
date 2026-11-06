@@ -41,15 +41,7 @@ data class EntryQuery(
     val authors: List<String> = emptyList(),
     val categories: List<String> = emptyList(),
     val kinds: List<String> = emptyList(),
-) {
-    /**
-     * A `before`-only page reads upward from the cursor so it returns the
-     * entries nearest the cursor rather than the newest ones.
-     */
-    val ascending: Boolean get() = before != null && after == null
-
-    val direction: String get() = if (ascending) "asc" else "desc"
-}
+)
 
 @Repository
 class EntryRepository(
@@ -110,7 +102,7 @@ class EntryRepository(
             .update()
     }
 
-    /** Returns up to `limit + 1` rows in [EntryQuery.direction] order. */
+    /** Returns up to `limit + 1` rows, newest first, between the `before` and `after` cursors. */
     fun page(query: EntryQuery): List<EntryRow> {
         val where = mutableListOf("e.removed_at is null", NOT_MODERATED)
         val params = mutableMapOf<String, Any?>("limit" to query.limit + 1)
@@ -161,7 +153,7 @@ class EntryRepository(
                 from microsub_entries e
                 left join microsub_feeds f on f.id = e.feed_id
                 where ${where.joinToString(" and ")}
-                order by e.published ${query.direction}, e.id ${query.direction}
+                order by e.published desc, e.id desc
                 limit :limit
                 """.trimIndent(),
             ).params(params)

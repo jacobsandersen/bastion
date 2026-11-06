@@ -19,7 +19,5 @@ class MicrosubError(
 
         fun insufficientScope(scope: String) =
             MicrosubError(HttpStatus.FORBIDDEN, "insufficient_scope", "This action requires the '$scope' scope")
-
-        fun notFound(description: String) = MicrosubError(HttpStatus.NOT_FOUND, "not_found", description)
     }
 }
