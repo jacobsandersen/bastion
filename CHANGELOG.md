@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.44](https://github.com/jacobsandersen/bastion/compare/v1.3.43...v1.3.44) (2026-11-06)
+
+
+### Bug Fixes
+
+* **microsub:** align with Microsub spec and stop webmentions to blocked users ([#120](https://github.com/jacobsandersen/bastion/issues/120)) ([1a52372](https://github.com/jacobsandersen/bastion/commit/1a52372d3b91ed68e99f7835583e9d6728087e36))
+
 ## [1.3.43](https://github.com/jacobsandersen/bastion/compare/v1.3.42...v1.3.43) (2026-11-05)
 
 
