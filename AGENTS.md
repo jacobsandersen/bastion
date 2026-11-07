@@ -289,7 +289,9 @@ When updating this file, preserve this bar for all agents and keep entries conci
   shared per (topic, hub), so unsubscribe only when no feed row still references the subscription. A content delivery
   only triggers a re-fetch; the pushed body is never ingested. Bastion requests leases via
   `bastion.websub.subscriber.*`, and `websub-subscription-renewal` renews them.
-- Paging: an opaque cursor over `(published desc, id desc)` (`entry/Cursor.kt`). Pages are always newest first,
+- Paging: an opaque cursor over `(created_at desc, published desc, id desc)` (`entry/Cursor.kt`), so late-arriving
+  entries with old `published` dates are never skipped by `before` polls; `mark_read` with `last_read_entry` still uses
+  publish order. Pre-arrival-order `published:id` cursors resolve via the entry's current position. Pages are always newest first,
   including `before`-only polls: those return the newest page and an `after` when more new entries exist (the spec's
   worked example), never the entries nearest the cursor. `before` is returned only when items are, and `after`
   whenever more matching items were not returned. Undated entries keep their first-seen time and are served with it
