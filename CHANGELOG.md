@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.45](https://github.com/jacobsandersen/bastion/compare/v1.3.44...v1.3.45) (2026-11-07)
+
+
+### Bug Fixes
+
+* **microsub:** order timelines by arrival so before polls never miss late entries ([#124](https://github.com/jacobsandersen/bastion/issues/124)) ([c4928e2](https://github.com/jacobsandersen/bastion/commit/c4928e22ae613d69bbc20d3594486bcba18e826e))
+
 ## [1.3.44](https://github.com/jacobsandersen/bastion/compare/v1.3.43...v1.3.44) (2026-11-07)
 
 
