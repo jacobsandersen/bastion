@@ -43,6 +43,9 @@ class AutoSyndicationTargetTest {
     lateinit var postSyndicationService: PostSyndicationService
 
     @Autowired
+    lateinit var syndicationConfig: SyndicationConfig
+
+    @Autowired
     lateinit var targetQueryService: SyndicationTargetQueryService
 
     @MockitoBean
@@ -119,5 +122,26 @@ class AutoSyndicationTargetTest {
             ),
         )
         assertEquals(setOf("always"), desired(created.id))
+    }
+
+    @Test
+    fun `updates do not attach an auto target to a post that does not have it`() {
+        val created = create()
+        // Simulate a post that predates the auto target: it only ever wanted "manual".
+        postSyndicationService.syncDesiredTargets(created.id, listOfNotNull(syndicationConfig.targetByUid("manual")))
+        assertEquals(setOf("manual"), desired(created.id))
+
+        postCommandService.update(
+            UpdatePostCommand(
+                url = created.url,
+                patch = PostPatch(),
+                requestedSlug = null,
+                status = null,
+                visibility = null,
+                syndicationTargets = SyndicationTargetChange(add = listOf("manual")),
+            ),
+        )
+
+        assertEquals(setOf("manual"), desired(created.id))
     }
 }
