@@ -18,7 +18,7 @@ data class PageRequest(
 )
 
 /**
- * Timelines and content search. Pages are always newest first. `before` is
+ * Timelines and content search. Pages are always newest first, ordered by when an entry was first stored and then by publish date. `before` is
  * returned whenever items are, and `after` whenever more matching items were
  * not returned, as the spec's paging rules require. That includes a
  * `before`-only poll that finds more new entries than fit in one page: it
@@ -146,7 +146,11 @@ class TimelineService(
 
     private fun cursor(value: String?): Cursor? {
         if (value.isNullOrBlank()) return null
-        return Cursor.decode(value) ?: throw MicrosubError.invalidRequest("Invalid paging cursor")
+        Cursor.decode(value)?.let { return it }
+        // A cursor from before timelines were ordered by arrival: resolve the entry's position now, or start over
+        // from the newest page if it has been purged (clients de-duplicate by entry id).
+        Cursor.legacyEntryId(value)?.let { return entries.cursorOf(it) }
+        throw MicrosubError.invalidRequest("Invalid paging cursor")
     }
 
     private fun limit(value: String?): Int {

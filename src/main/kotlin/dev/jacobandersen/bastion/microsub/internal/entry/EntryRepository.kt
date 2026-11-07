@@ -19,12 +19,13 @@ data class EntrySource(
 data class EntryRow(
     val id: UUID,
     val channelId: UUID,
+    val createdAt: Instant,
     val published: Instant,
     val isRead: Boolean,
     val data: Map<String, Any?>,
     val source: EntrySource?,
 ) {
-    val cursor: Cursor get() = Cursor(published, id)
+    val cursor: Cursor get() = Cursor(createdAt, published, id)
 }
 
 /**
@@ -102,6 +103,15 @@ class EntryRepository(
             .update()
     }
 
+    /** Where an entry sits in the timeline now; null once it has been purged. */
+    fun cursorOf(id: UUID): Cursor? =
+        jdbc
+            .sql("select created_at, published from microsub_entries where id = :id")
+            .param("id", id)
+            .query { rs, _ -> Cursor(rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("published").toInstant(), id) }
+            .optional()
+            .orElse(null)
+
     /** Returns up to `limit + 1` rows, newest first, between the `before` and `after` cursors. */
     fun page(query: EntryQuery): List<EntryRow> {
         val where = mutableListOf("e.removed_at is null", NOT_MODERATED)
@@ -112,12 +122,14 @@ class EntryRepository(
             params["channels"] = it.ifEmpty { listOf(UUID(0, 0)) }
         }
         query.after?.let {
-            where += "(e.published, e.id) < (:afterPublished, :afterId)"
+            where += "(e.created_at, e.published, e.id) < (:afterCreated, :afterPublished, :afterId)"
+            params["afterCreated"] = Timestamp.from(it.createdAt)
             params["afterPublished"] = Timestamp.from(it.published)
             params["afterId"] = it.id
         }
         query.before?.let {
-            where += "(e.published, e.id) > (:beforePublished, :beforeId)"
+            where += "(e.created_at, e.published, e.id) > (:beforeCreated, :beforePublished, :beforeId)"
+            params["beforeCreated"] = Timestamp.from(it.createdAt)
             params["beforePublished"] = Timestamp.from(it.published)
             params["beforeId"] = it.id
         }
@@ -148,12 +160,12 @@ class EntryRepository(
         return jdbc
             .sql(
                 """
-                select e.id, e.channel_id, e.published, e.is_read, e.data::text as data,
+                select e.id, e.channel_id, e.created_at, e.published, e.is_read, e.data::text as data,
                        f.id as feed_id, f.url as feed_url, f.name as feed_name, f.photo as feed_photo
                 from microsub_entries e
                 left join microsub_feeds f on f.id = e.feed_id
                 where ${where.joinToString(" and ")}
-                order by e.published desc, e.id desc
+                order by e.created_at desc, e.published desc, e.id desc
                 limit :limit
                 """.trimIndent(),
             ).params(params)
@@ -259,6 +271,7 @@ class EntryRepository(
         return EntryRow(
             id = rs.getObject("id", UUID::class.java),
             channelId = rs.getObject("channel_id", UUID::class.java),
+            createdAt = rs.getTimestamp("created_at").toInstant(),
             published = rs.getTimestamp("published").toInstant(),
             isRead = rs.getBoolean("is_read"),
             data = objectMapper.readValue(rs.getString("data"), Map::class.java) as Map<String, Any?>,
