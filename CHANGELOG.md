@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.44](https://github.com/jacobsandersen/bastion/compare/v1.3.43...v1.3.44) (2026-11-07)
+
+
+### Features
+
+* **post:** add auto syndication targets that attach to every new post ([#122](https://github.com/jacobsandersen/bastion/issues/122)) ([7d4267d](https://github.com/jacobsandersen/bastion/commit/7d4267d5cb8ee55e0d40114de9ee6539853d689c))
+
+
+### Bug Fixes
+
+* **micropub:** include canonical url in q=source and list all non-deleted posts ([#123](https://github.com/jacobsandersen/bastion/issues/123)) ([213e208](https://github.com/jacobsandersen/bastion/commit/213e208c3f58fa153cf572c352973cf8e9e62f83))
+* **microsub:** align with Microsub spec and stop webmentions to blocked users ([#120](https://github.com/jacobsandersen/bastion/issues/120)) ([1a52372](https://github.com/jacobsandersen/bastion/commit/1a52372d3b91ed68e99f7835583e9d6728087e36))
+
 ## [1.3.43](https://github.com/jacobsandersen/bastion/compare/v1.3.42...v1.3.43) (2026-11-05)
 
 
