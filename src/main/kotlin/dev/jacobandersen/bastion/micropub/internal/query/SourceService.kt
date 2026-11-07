@@ -4,6 +4,7 @@ import dev.jacobandersen.bastion.micropub.internal.type.resp.ApiResponse
 import dev.jacobandersen.bastion.micropub.internal.type.resp.SourceListResponse
 import dev.jacobandersen.bastion.post.query.PostQueryResult
 import dev.jacobandersen.bastion.post.query.PostQueryService
+import dev.jacobandersen.microformats2.Mf2Value
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 
@@ -52,7 +53,7 @@ class SourceService(
         val requestedProperties = params["properties"].takeUnless { it.isNullOrEmpty() }
         val filtered =
             if (requestedProperties == null) {
-                post.post
+                post.post.setProperty("url", Mf2Value.String(post.url))
             } else {
                 post.post.copy(properties = post.post.properties.filterKeys { it in requestedProperties })
             }
@@ -85,11 +86,14 @@ class SourceService(
         val posts =
             try {
                 postQueryService.list(parsedLimit, parsedOffset).map { view ->
-                    if (requestedProperties == null) {
-                        view.post
-                    } else {
-                        view.post.copy(properties = view.post.properties.filterKeys { it in requestedProperties })
-                    }
+                    // The canonical URL is always included so clients can send edits for listed posts.
+                    val filtered =
+                        if (requestedProperties == null) {
+                            view.post
+                        } else {
+                            view.post.copy(properties = view.post.properties.filterKeys { it in requestedProperties })
+                        }
+                    filtered.setProperty("url", Mf2Value.String(view.url))
                 }
             } catch (e: IllegalArgumentException) {
                 return ApiResponse.Error.InvalidRequest(errorDescription = e.message ?: "Invalid source query")

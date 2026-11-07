@@ -127,6 +127,19 @@ class PostService(
         return saved
     }
 
+    /** Every non-deleted post regardless of status or visibility, newest first. For authenticated reads only. */
+    @Transactional(readOnly = true)
+    fun findAllPosts(
+        limit: Int,
+        offset: Int,
+    ): List<Post> {
+        require(offset % limit == 0) { "offset must be a multiple of limit" }
+
+        val pageRequest = PageRequest.of(offset / limit, limit, Sort.by("createdAtUtc").descending())
+
+        return repository.findByDeletedFalse(pageRequest).content.map { it.toDomain() }
+    }
+
     @Transactional(readOnly = true)
     fun findPublicPosts(
         limit: Int,
