@@ -13,7 +13,7 @@ class SyndicationTargetQueryService(
     private val config: SyndicationConfig,
 ) {
     fun targets(): List<SyndicationTargetView> =
-        config.targets.map { target ->
+        config.targets.filterNot { it.auto }.map { target ->
             SyndicationTargetView(uid = target.uid, name = target.name)
         }
 }
