@@ -482,6 +482,44 @@ class MicrosubIntegrationTest {
     }
 
     @Test
+    fun `a before poll finds a late entry that was published before the newest one`() {
+        pages["/late"] = "text/html" to hFeed(hEntry("p5", "Newest", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/late")
+        val top = timeline(channel)["paging"]["before"].asString()
+
+        // p2 was published days before p5 but only shows up in the feed now.
+        pages["/late"] =
+            "text/html" to hFeed(hEntry("p5", "Newest", "https://alice.example/"), hEntry("p2", "Late", "https://alice.example/"))
+        refresh.refreshClaimed(feedId(channel))
+
+        assertEquals(listOf("$base/p2"), urls(timeline(channel, "before" to top)))
+        assertEquals(listOf("$base/p2", "$base/p5"), urls(timeline(channel)))
+    }
+
+    @Test
+    fun `a paging cursor from before arrival ordering still resolves`() {
+        pages["/legacy"] =
+            "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"), hEntry("p2", "Second", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/legacy")
+        val page = timeline(channel, "limit" to "1")
+        val id = page["items"][0]["_id"].asString()
+        val micros =
+            java.time.temporal.ChronoUnit.MICROS.between(
+                java.time.Instant.EPOCH,
+                java.time.Instant.parse(page["items"][0]["published"].asString()),
+            )
+        val legacy =
+            java.util.Base64
+                .getUrlEncoder()
+                .withoutPadding()
+                .encodeToString("$micros:$id".toByteArray())
+
+        assertEquals(listOf("$base/p1"), urls(timeline(channel, "after" to legacy)))
+    }
+
+    @Test
     fun `a before poll that fits in one page carries no after cursor`() {
         pages["/poll"] = "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"))
         val channel = newChannel()
