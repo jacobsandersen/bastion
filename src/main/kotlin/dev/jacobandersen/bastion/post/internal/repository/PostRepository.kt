@@ -28,6 +28,8 @@ interface PostRepository :
         pageable: Pageable,
     ): List<PostEntity>
 
+    fun findByDeletedFalse(page: Pageable): Page<PostEntity>
+
     fun findByStatusAndVisibilityAndDeletedFalse(
         status: PostStatus,
         visibility: PostVisibility,

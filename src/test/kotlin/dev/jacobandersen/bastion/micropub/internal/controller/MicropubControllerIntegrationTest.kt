@@ -293,6 +293,64 @@ class MicropubControllerIntegrationTest {
     }
 
     @Test
+    fun listIncludesDraftsAndPrivatePostsWithCanonicalUrl() {
+        val draft = createJsonPost("""{"name": ["Draft"], "post-status": ["draft"]}""")
+        val private = createJsonPost("""{"name": ["Private"], "visibility": ["private"]}""")
+
+        val body =
+            mockMvc
+                .perform(get("/micropub").param("q", "source").header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().isOk)
+                .andReturn()
+                .response.contentAsString
+
+        val items = mapper.readTree(body).path("items")
+        val urls = items.toList().map { it.path("properties").path("url")[0].asText() }.toSet()
+        assertEquals(setOf(draft, private), urls)
+    }
+
+    @Test
+    fun listKeepsUrlWhenPropertiesAreFiltered() {
+        val url = createJsonPost("""{"name": ["Hi"], "content": ["body"]}""")
+
+        val body =
+            mockMvc
+                .perform(
+                    get("/micropub")
+                        .param("q", "source")
+                        .param("properties[]", "name")
+                        .header(HttpHeaders.AUTHORIZATION, bearer),
+                ).andExpect(status().isOk)
+                .andReturn()
+                .response.contentAsString
+
+        val props = mapper.readTree(body).path("items")[0].path("properties")
+        assertEquals(url, props.path("url")[0].asText())
+        assertTrue(props.path("content").isMissingNode)
+    }
+
+    @Test
+    fun singleSourceIncludesCanonicalUrl() {
+        val url = createJsonPost("""{"name": ["Hi"]}""")
+
+        val body =
+            mockMvc
+                .perform(get("/micropub").param("q", "source").param("url", url!!).header(HttpHeaders.AUTHORIZATION, bearer))
+                .andExpect(status().isOk)
+                .andReturn()
+                .response.contentAsString
+
+        assertEquals(
+            url,
+            mapper
+                .readTree(body)
+                .path("properties")
+                .path("url")[0]
+                .asText(),
+        )
+    }
+
+    @Test
     fun listRejectsInvalidLimit() {
         mockMvc
             .perform(

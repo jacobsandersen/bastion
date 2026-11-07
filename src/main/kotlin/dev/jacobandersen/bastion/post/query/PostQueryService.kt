@@ -42,7 +42,7 @@ class PostQueryService(
         require(offset >= 0) { "offset must be a non-negative integer" }
         require(offset % limit == 0) { "offset must be a multiple of limit ($offset % $limit != 0)" }
 
-        return postService.findPublicPosts(limit, offset).map { it.toStateView() }
+        return postService.findAllPosts(limit, offset).map { it.toStateView() }
     }
 
     private fun Post.toStateView(): PostStateView =
