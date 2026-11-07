@@ -228,6 +228,10 @@ When updating this file, preserve this bar for all agents and keep entries conci
   excerpt is truncated; oversized field values push the post to `overflow-format`.
 - Updates use `SyndicationHttpClient.serializeExcerptUpdate`: a full `content`/`summary`/`url` (and article `name`)
   replace built from current post state, not the original Micropub delta. This keeps reconciliation idempotent.
+- A target with `auto: true` is attached to every new post by `PostCommandService.create` regardless of
+  `mp-syndicate-to` (for clients that cannot send it) and is filtered out of `SyndicationTargetQueryService`, so it is
+  absent from `q=config`/`q=syndicate-to`. There is no backfill: updates only re-add auto targets the post already has a
+  desired row for, so `replace`/`remove`/`removeAll` cannot drop them and old posts are never picked up.
 - `mp-syndicate-to` is translated by Micropub into a protocol-neutral `SyndicationTargetChange`
   (`replace`/`add`/`remove`); the post command applies it to the current desired target set.
 

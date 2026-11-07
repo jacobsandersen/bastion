@@ -81,4 +81,11 @@ class SyndicationConfigTest {
         assertEquals("bridgy", config.targetByUid("bridgy")?.uid)
         assertEquals(null, config.targetByUid("missing"))
     }
+
+    @Test
+    fun `auto defaults to false and autoTargetUids lists auto targets`() {
+        val auto = SyndicationConfig.Target(uid = "always", name = "Always", endpoint = "https://example.com/m", auto = true)
+        assertEquals(false, target("bridgy").auto)
+        assertEquals(listOf("always"), SyndicationConfig(listOf(target("bridgy"), auto)).autoTargetUids())
+    }
 }

@@ -13,7 +13,9 @@ data class SyndicationConfig(
      * a display [name], the downstream micropub [endpoint], an optional bearer
      * [token], the [actions] it supports, and an optional per-target
      * [maxGraphemes] total budget (title + excerpt + link) that overrides
-     * [defaultMaxGraphemes].
+     * [defaultMaxGraphemes]. An [auto] target is attached to every new post
+     * regardless of `mp-syndicate-to`, and is hidden from the targets advertised
+     * to Micropub clients.
      */
     data class Target(
         val uid: String,
@@ -22,6 +24,7 @@ data class SyndicationConfig(
         val token: String? = null,
         val actions: Set<SyndicationAction> = setOf(SyndicationAction.CREATE, SyndicationAction.DELETE),
         val maxGraphemes: Int? = null,
+        val auto: Boolean = false,
     ) {
         fun supports(action: SyndicationAction): Boolean = action in actions
     }
@@ -29,6 +32,8 @@ data class SyndicationConfig(
     fun effectiveMaxGraphemes(target: Target): Int = (target.maxGraphemes ?: defaultMaxGraphemes).coerceAtLeast(1)
 
     fun targetByUid(uid: String): Target? = targets.firstOrNull { it.uid == uid }
+
+    fun autoTargetUids(): List<String> = targets.filter { it.auto }.map { it.uid }
 
     fun targetsSupporting(
         uids: Collection<String>,

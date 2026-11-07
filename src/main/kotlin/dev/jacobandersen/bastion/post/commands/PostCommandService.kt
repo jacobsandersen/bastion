@@ -40,7 +40,7 @@ class PostCommandService(
                 throw PostCommandException("Invalid published value: ${e.message}")
             }
 
-        syncSyndication(post.id, command.syndicationTargetUids)
+        syncSyndication(post.id, command.syndicationTargetUids + syndicationConfig.autoTargetUids())
         logger.info { "Created post ${post.id} at ${urlService.generatePostUrl(post)}" }
         return post.toResult()
     }
@@ -125,7 +125,9 @@ class PostCommandService(
                     retained + change.add
                 }
             }
-        syncSyndication(postId, desired)
+        // Auto targets already attached to this post cannot be dropped by a client; posts without one are left alone.
+        val keptAuto = syndicationConfig.autoTargetUids().filter { it in current }
+        syncSyndication(postId, desired + keptAuto)
     }
 
     private fun deriveSlug(obj: Mf2Object): String {
