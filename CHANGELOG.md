@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.47](https://github.com/jacobsandersen/bastion/compare/v1.3.46...v1.3.47) (2026-11-08)
+
+
+### Features
+
+* **microsub:** add on-demand refresh and live entries event stream ([#128](https://github.com/jacobsandersen/bastion/issues/128)) ([9a0b4e8](https://github.com/jacobsandersen/bastion/commit/9a0b4e8a115de00273d97b04623207983e0f38f9))
+
 ## [1.3.46](https://github.com/jacobsandersen/bastion/compare/v1.3.45...v1.3.46) (2026-11-08)
 
 
