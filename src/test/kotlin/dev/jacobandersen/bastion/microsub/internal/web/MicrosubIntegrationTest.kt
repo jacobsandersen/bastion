@@ -263,9 +263,12 @@ class MicrosubIntegrationTest {
             ).andExpect(status().isOk)
             .andExpect(jsonPath("$.type").value("feed"))
             .andExpect(jsonPath("$.name").value("Test feed"))
+            .andExpect(jsonPath("$.format").value("mf2"))
+            .andExpect(jsonPath("$.websub").doesNotExist())
         mockMvc
             .perform(get("/microsub").auth().param("action", "follow").param("channel", channel))
             .andExpect(jsonPath("$.items", hasSize<Any>(1)))
+            .andExpect(jsonPath("$.items[0].format").value("mf2"))
 
         // Page through newest first, two at a time.
         val first =

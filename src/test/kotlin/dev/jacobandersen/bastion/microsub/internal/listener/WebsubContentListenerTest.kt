@@ -36,7 +36,7 @@ class WebsubContentListenerTest {
             channelId = UUID.randomUUID(),
             url = "https://x.example/",
             fetchUrl = "https://x.example/feed",
-            format = FeedFormat.XML,
+            format = FeedFormat.RSS,
             name = null,
             photo = null,
             description = null,

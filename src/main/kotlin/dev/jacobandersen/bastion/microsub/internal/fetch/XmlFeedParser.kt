@@ -35,7 +35,7 @@ object XmlFeedParser {
 
         val links = atomLinks(feed)
         return ParsedFeed(
-            format = FeedFormat.XML,
+            format = if (feed.feedType.startsWith("atom")) FeedFormat.ATOM else FeedFormat.RSS,
             url = url,
             name = feed.title?.let(HtmlSanitizer::text),
             photo = feed.image?.url?.let { MicrosubUrls.resolve(url, it) },
