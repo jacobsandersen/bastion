@@ -5,6 +5,7 @@ import dev.jacobandersen.bastion.microsub.internal.entry.PageRequest
 import dev.jacobandersen.bastion.microsub.internal.entry.TimelineService
 import dev.jacobandersen.bastion.microsub.internal.feed.DiscoveryService
 import dev.jacobandersen.bastion.microsub.internal.feed.FollowService
+import dev.jacobandersen.bastion.microsub.internal.live.EntryEvents
 import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationKind
 import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationService
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubAuthentication
@@ -15,8 +16,10 @@ import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.FOLLOW
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.MUTE
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubScope.READ
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.http.CacheControl
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.util.MultiValueMap
@@ -28,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestMethod
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 private val logger = KotlinLogging.logger {}
 
@@ -44,6 +48,7 @@ class MicrosubController(
     private val follows: FollowService,
     private val discovery: DiscoveryService,
     private val moderation: ModerationService,
+    private val events: EntryEvents,
 ) {
     @GetMapping
     fun get(
@@ -94,6 +99,29 @@ class MicrosubController(
                 }
             }
         return ResponseEntity.ok(body)
+    }
+
+    /** Server-sent `entries` events (`{"channel":uid,"count":n}`) as feed fetches store new entries. */
+    @GetMapping("/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    fun eventStream(): ResponseEntity<SseEmitter> {
+        require(READ)
+        return ResponseEntity
+            .ok()
+            .cacheControl(CacheControl.noCache())
+            .header("X-Accel-Buffering", "no")
+            .body(events.subscribe())
+    }
+
+    /**
+     * Not part of the Microsub spec, so it is a sibling of the endpoint and the action namespace stays conformant:
+     * starts a background fetch of the channel's stale feeds and answers at once with how many it started.
+     */
+    @PostMapping("/refresh")
+    fun refresh(
+        @RequestParam params: MultiValueMap<String, String>,
+    ): ResponseEntity<Any> {
+        require(READ)
+        return ResponseEntity.ok(mapOf("refreshing" to follows.refreshStale(Params(params).one("channel"))))
     }
 
     @PostMapping

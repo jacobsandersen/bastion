@@ -32,6 +32,8 @@ class FollowService(
 ) {
     fun list(channelUid: String?): List<Map<String, Any>> = feeds.listByChannel(channels.require(channelUid).id).map(::view)
 
+    fun refreshStale(channelUid: String?): Int = refresh.refreshStale(channels.require(channelUid).id)
+
     fun follow(
         channelUid: String?,
         url: String?,

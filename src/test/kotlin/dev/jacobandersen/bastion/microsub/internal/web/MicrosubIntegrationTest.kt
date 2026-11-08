@@ -628,6 +628,68 @@ class MicrosubIntegrationTest {
     }
 
     @Test
+    fun `refresh fetches only stale feeds of the channel without waiting for the fetch`() {
+        pages["/live"] = "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/live")
+        pages["/live"] =
+            "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"), hEntry("p2", "Second", "https://alice.example/"))
+
+        fun requestRefresh(token: String = "readonly") = mockMvc.perform(post("/microsub/refresh").auth(token).param("channel", channel))
+
+        requestRefresh().andExpect(status().isOk).andExpect(jsonPath("$.refreshing").value(0))
+        assertEquals(0, unread(channel), "a just-fetched feed is not fetched again")
+
+        val longAgo = java.sql.Timestamp.from(Instant.now().minus(Duration.ofHours(1)))
+        jdbc.sql("update microsub_feeds set last_fetched_at = :at").param("at", longAgo).update()
+        requestRefresh().andExpect(jsonPath("$.refreshing").value(1))
+        requestRefresh().andExpect(jsonPath("$.refreshing").value(0)) // claimed by the fetch just started
+        assertEquals(0, unread(channel), "the request only queues the fetch")
+        refresh.refreshClaimed(feedId(channel)) // the job server is off in tests, so run the queued job
+        assertEquals(1, unread(channel))
+
+        mockMvc
+            .perform(post("/microsub/refresh").auth().param("channel", "nope"))
+            .andExpect(status().isBadRequest)
+        mockMvc
+            .perform(post("/microsub/refresh").param("channel", channel))
+            .andExpect(status().isUnauthorized)
+        mockMvc
+            .perform(post("/microsub").auth().param("action", "refresh").param("channel", channel))
+            .andExpect(status().isBadRequest) // not an action of the Microsub endpoint
+    }
+
+    @Test
+    fun `streams an entries event when a fetch stores new entries`() {
+        pages["/stream"] = "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/stream")
+
+        val result = mockMvc.perform(get("/microsub/events").auth("readonly")).andReturn()
+        val response = result.response
+        await().untilAsserted { assertTrue(response.contentAsString.contains(":connected")) }
+        assertEquals("no", response.getHeader("X-Accel-Buffering"))
+        assertTrue(response.getHeader(HttpHeaders.CACHE_CONTROL).orEmpty().contains("no-cache"))
+        assertTrue(response.contentType.orEmpty().startsWith("text/event-stream"))
+
+        refresh.refreshClaimed(feedId(channel))
+        assertFalse(response.contentAsString.contains("event:entries"), "an unchanged fetch announces nothing")
+
+        pages["/stream"] =
+            "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"), hEntry("p2", "Second", "https://alice.example/"))
+        refresh.refreshClaimed(feedId(channel))
+        await().untilAsserted {
+            assertTrue(response.contentAsString.contains("event:entries"))
+            assertTrue(response.contentAsString.contains("data:{\"channel\":\"$channel\",\"count\":1}"))
+        }
+    }
+
+    @Test
+    fun `the event stream needs a token`() {
+        mockMvc.perform(get("/microsub/events")).andExpect(status().isUnauthorized)
+    }
+
+    @Test
     fun `releases WebSub subscriptions when a channel is deleted`() {
         pages["/hubbed"] =
             "text/html" to

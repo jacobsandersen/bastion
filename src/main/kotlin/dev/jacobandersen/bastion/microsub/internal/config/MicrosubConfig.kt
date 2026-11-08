@@ -9,6 +9,7 @@ import java.time.Duration
  * @property maxBackoff Upper bound for the failure backoff between fetches.
  * @property schedulerInterval How often the poll job looks for due feeds.
  * @property pollBatchSize The most feeds one poll run claims.
+ * @property refreshStaleAfter A client-requested refresh only fetches feeds last fetched longer ago than this.
  * @property claimTimeout How long a claimed fetch may run before another run may take it over.
  * @property connectTimeout Outbound connect timeout for feed fetches.
  * @property readTimeout Outbound read timeout for feed fetches.
@@ -26,6 +27,7 @@ data class MicrosubConfig(
     val maxBackoff: Duration = Duration.ofDays(1),
     val schedulerInterval: Duration = Duration.ofMinutes(5),
     val pollBatchSize: Int = 50,
+    val refreshStaleAfter: Duration = Duration.ofMinutes(5),
     val claimTimeout: Duration = Duration.ofMinutes(5),
     val connectTimeout: Duration = Duration.ofSeconds(10),
     val readTimeout: Duration = Duration.ofSeconds(15),

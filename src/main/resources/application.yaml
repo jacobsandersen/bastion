@@ -74,6 +74,7 @@ bastion:
     max-backoff: ${BASTION_MICROSUB_MAX_BACKOFF:1d}
     scheduler-interval: ${BASTION_MICROSUB_SCHEDULER_INTERVAL:5m}
     poll-batch-size: ${BASTION_MICROSUB_POLL_BATCH_SIZE:50}
+    refresh-stale-after: ${BASTION_MICROSUB_REFRESH_STALE_AFTER:5m}
     claim-timeout: ${BASTION_MICROSUB_CLAIM_TIMEOUT:5m}
     connect-timeout: ${BASTION_MICROSUB_CONNECT_TIMEOUT:10s}
     read-timeout: ${BASTION_MICROSUB_READ_TIMEOUT:15s}
