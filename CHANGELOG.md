@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.46](https://github.com/jacobsandersen/bastion/compare/v1.3.45...v1.3.46) (2026-11-08)
+
+
+### Features
+
+* **microsub:** expose feed format and websub state in the follow list ([#126](https://github.com/jacobsandersen/bastion/issues/126)) ([961e534](https://github.com/jacobsandersen/bastion/commit/961e534fc8161e149f10193d6a498addafea91ab))
+
 ## [1.3.45](https://github.com/jacobsandersen/bastion/compare/v1.3.44...v1.3.45) (2026-11-07)
 
 
