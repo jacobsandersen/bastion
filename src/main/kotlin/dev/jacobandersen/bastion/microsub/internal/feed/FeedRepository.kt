@@ -149,6 +149,40 @@ class FeedRepository(
             .query { rs, _ -> rs.getObject("id", UUID::class.java) }
             .list()
 
+    /**
+     * Claims up to [limit] unclaimed feeds of a channel that were last fetched before [staleBefore], for an on-demand
+     * refresh. Failing feeds are left to their backoff so a client cannot bypass it.
+     */
+    fun claimStale(
+        channelId: UUID,
+        staleBefore: Instant,
+        now: Instant,
+        claimUntil: Instant,
+        limit: Int,
+    ): List<UUID> =
+        jdbc
+            .sql(
+                """
+                update microsub_feeds set claimed_until = :until, fetch_started_at = :now
+                where id in (
+                    select id from microsub_feeds
+                    where channel_id = :channel and failure_count = 0
+                      and (last_fetched_at is null or last_fetched_at < :stale)
+                      and (claimed_until is null or claimed_until < :now)
+                    order by last_fetched_at nulls first
+                    limit :limit
+                    for update skip locked
+                )
+                returning id
+                """.trimIndent(),
+            ).param("channel", channelId)
+            .param("stale", Timestamp.from(staleBefore))
+            .param("now", Timestamp.from(now))
+            .param("until", Timestamp.from(claimUntil))
+            .param("limit", limit)
+            .query { rs, _ -> rs.getObject("id", UUID::class.java) }
+            .list()
+
     fun claim(
         id: UUID,
         now: Instant,

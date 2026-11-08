@@ -21,7 +21,7 @@ class EntryIngestService(
      * Stores a feed's items. Item ids (JSON Feed `id`, RSS `guid`) are only
      * unique within one feed, so the source key is scoped to the feed's
      * followed [feedUrl], which is unique per channel and survives an
-     * unfollow and re-follow, unlike [feedId].
+     * unfollow and re-follow, unlike [feedId]. Returns how many entries were new.
      */
     @Transactional
     fun ingest(
@@ -32,13 +32,12 @@ class EntryIngestService(
         read: Boolean,
     ): Int {
         val now = Instant.now()
-        var stored = 0
+        var added = 0
         items.forEach { item ->
             if (item.authorUrl != null && moderation.isBlocked(channelId, item.authorUrl)) return@forEach
-            ingestOne(channelId, feedId, feedSourceKey(feedUrl, item), item, read, now)
-            stored++
+            if (ingestOne(channelId, feedId, feedSourceKey(feedUrl, item), item, read, now)) added++
         }
-        return stored
+        return added
     }
 
     @Transactional
@@ -49,10 +48,10 @@ class EntryIngestService(
         item: Jf2Item,
         read: Boolean,
         now: Instant,
-    ) {
+    ): Boolean {
         // Future-dated entries would pin themselves to the top of the timeline.
         val published = item.published?.coerceAtMost(now) ?: now
-        entries.upsert(channelId, feedId, sourceKey, item, published, item.published != null, read, now)
+        return entries.upsert(channelId, feedId, sourceKey, item, published, item.published != null, read, now)
     }
 
     private fun feedSourceKey(

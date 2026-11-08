@@ -28,6 +28,14 @@ class ChannelRepository(
             .optional()
             .orElse(null)
 
+    fun uidOf(id: UUID): String? =
+        jdbc
+            .sql("select uid from microsub_channels where id = :id")
+            .param("id", id)
+            .query(String::class.java)
+            .optional()
+            .orElse(null)
+
     fun uidExists(uid: String): Boolean =
         jdbc
             .sql("select count(*) from microsub_channels where uid = :uid")

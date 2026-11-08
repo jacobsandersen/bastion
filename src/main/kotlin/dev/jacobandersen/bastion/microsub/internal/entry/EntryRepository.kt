@@ -55,7 +55,7 @@ class EntryRepository(
      * marks read ones unread. An undated entry keeps the time it was first
      * seen ([dated] false) instead of moving to the top on every fetch.
      * Every upsert records when the entry was last seen, which retention uses
-     * to keep entries that are still in their feed.
+     * to keep entries that are still in their feed. Returns whether the entry is new.
      */
     fun upsert(
         channelId: UUID,
@@ -66,7 +66,7 @@ class EntryRepository(
         dated: Boolean,
         read: Boolean,
         now: Instant,
-    ) {
+    ): Boolean =
         jdbc
             .sql(
                 """
@@ -85,6 +85,7 @@ class EntryRepository(
                     search = excluded.search,
                     updated_at = case when $DATA_CHANGED then excluded.updated_at else microsub_entries.updated_at end,
                     last_seen_at = excluded.last_seen_at
+                returning (xmax = 0) as inserted
                 """.trimIndent(),
             ).param("id", UUID.randomUUID())
             .param("channel", channelId)
@@ -100,8 +101,8 @@ class EntryRepository(
             .param("search", item.searchText)
             .param("read", read)
             .param("now", Timestamp.from(now))
-            .update()
-    }
+            .query { rs, _ -> rs.getBoolean("inserted") }
+            .single()
 
     /** Where an entry sits in the timeline now; null once it has been purged. */
     fun cursorOf(id: UUID): Cursor? =

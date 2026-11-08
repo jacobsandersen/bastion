@@ -1,10 +1,12 @@
 package dev.jacobandersen.bastion.microsub.internal.feed
 
+import dev.jacobandersen.bastion.microsub.internal.channel.ChannelRepository
 import dev.jacobandersen.bastion.microsub.internal.config.MicrosubConfig
 import dev.jacobandersen.bastion.microsub.internal.entry.EntryIngestService
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedDiscovery
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedLoad
 import dev.jacobandersen.bastion.microsub.internal.fetch.ParsedFeed
+import dev.jacobandersen.bastion.microsub.internal.live.EntryEvents
 import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionService
 import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionState
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -27,6 +29,8 @@ class FeedRefreshService(
     private val feeds: FeedRepository,
     private val discovery: FeedDiscovery,
     private val ingest: EntryIngestService,
+    private val channels: ChannelRepository,
+    private val events: EntryEvents,
     private val websub: WebsubSubscriptionService,
     private val jobScheduler: JobScheduler,
     private val config: MicrosubConfig,
@@ -37,6 +41,24 @@ class FeedRefreshService(
         val claimed = feeds.claimDue(now, now.plus(config.claimTimeout), config.pollBatchSize)
         claimed.forEach { id -> jobScheduler.enqueue { refreshClaimed(id) } }
         if (claimed.isNotEmpty()) logger.info { "Microsub poll claimed ${claimed.size} feeds" }
+    }
+
+    /**
+     * On-demand refresh for a client opening a channel: fetches the channel's feeds that are stale, capped at the poll
+     * batch size, each in its own job so the caller never waits on the network. Returns how many were started.
+     */
+    fun refreshStale(channelId: UUID): Int {
+        val now = Instant.now()
+        val claimed =
+            feeds.claimStale(
+                channelId,
+                now.minus(config.refreshStaleAfter),
+                now,
+                now.plus(config.claimTimeout),
+                config.pollBatchSize,
+            )
+        claimed.forEach { id -> jobScheduler.enqueue { refreshClaimed(id) } }
+        return claimed.size
     }
 
     /** Asks for a fetch now, e.g. after a WebSub notification. */
@@ -68,7 +90,8 @@ class FeedRefreshService(
             }
 
             is FeedLoad.Loaded -> {
-                ingest.ingest(feed.channelId, feed.id, feed.url, load.feed.items, read = false)
+                val added = ingest.ingest(feed.channelId, feed.id, feed.url, load.feed.items, read = false)
+                if (added > 0) channels.uidOf(feed.channelId)?.let { events.publish(it, added) }
                 val subscriptionId = syncSubscription(feed, load.feed)
                 feeds.recordSuccess(feed.id, metadataOf(load), now.plus(successInterval(subscriptionId)), now)
             }
