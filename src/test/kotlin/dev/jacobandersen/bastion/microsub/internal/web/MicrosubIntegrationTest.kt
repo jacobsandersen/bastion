@@ -682,6 +682,11 @@ class MicrosubIntegrationTest {
             assertTrue(response.contentAsString.contains("event:entries"))
             assertTrue(response.contentAsString.contains("data:{\"channel\":\"$channel\",\"count\":1}"))
         }
+        assertEquals(
+            1,
+            "event:entries".toRegex().findAll(response.contentAsString).count(),
+            "only the fetch that stored a new entry is announced",
+        )
     }
 
     @Test
