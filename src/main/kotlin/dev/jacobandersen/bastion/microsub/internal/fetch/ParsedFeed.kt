@@ -4,7 +4,8 @@ import dev.jacobandersen.bastion.microsub.internal.jf2.Jf2Item
 
 enum class FeedFormat {
     MF2,
-    XML,
+    RSS,
+    ATOM,
     JSON,
 }
 

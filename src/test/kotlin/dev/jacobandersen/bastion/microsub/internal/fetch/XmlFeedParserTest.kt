@@ -29,6 +29,7 @@ class XmlFeedParserTest {
 
         val feed = XmlFeedParser.parse(rss.toByteArray(), "https://bob.example/feed.xml", 50)
 
+        assertEquals(FeedFormat.RSS, feed.format)
         assertEquals("Bob's blog", feed.name)
         assertEquals(listOf("https://hub.example/"), feed.hubs)
         assertEquals("https://bob.example/feed.xml", feed.self)
@@ -62,6 +63,7 @@ class XmlFeedParserTest {
 
         val feed = XmlFeedParser.parse(atom.toByteArray(), "https://carol.example/atom", 50)
 
+        assertEquals(FeedFormat.ATOM, feed.format)
         val item = feed.items.single()
         assertNull(item.data["name"])
         assertEquals("tag:carol,2026:1", item.sourceKey)
