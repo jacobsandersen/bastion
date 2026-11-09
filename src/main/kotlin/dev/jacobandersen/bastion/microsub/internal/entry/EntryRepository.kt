@@ -230,7 +230,7 @@ class EntryRepository(
             .update()
     }
 
-    /** Marks [entryId] and everything older in the channel read. */
+    /** Marks [entryId] and everything at or before it in the timeline's own order (arrival, see [page]) read. */
     fun markReadThrough(
         channelId: UUID,
         entryId: UUID,
@@ -242,7 +242,7 @@ class EntryRepository(
                 from microsub_entries anchor
                 where anchor.id = :entry and anchor.channel_id = :channel
                   and e.channel_id = :channel and not e.is_read
-                  and (e.published, e.id) <= (anchor.published, anchor.id)
+                  and (e.created_at, e.published, e.id) <= (anchor.created_at, anchor.published, anchor.id)
                 """.trimIndent(),
             ).param("channel", channelId)
             .param("entry", entryId)

@@ -12,7 +12,7 @@ class FeedRefreshCommandService(
 ) {
     /**
      * Starts a background fetch of the channel's stale feeds and returns how many were started, or null when there is
-     * no channel [channelUid]. Shares [FeedRefreshService.refreshStale] with the legacy `/microsub/refresh` route.
+     * no channel [channelUid].
      */
     fun refreshStale(channelUid: String): Int? {
         val channel = channels.findByUid(channelUid) ?: return null

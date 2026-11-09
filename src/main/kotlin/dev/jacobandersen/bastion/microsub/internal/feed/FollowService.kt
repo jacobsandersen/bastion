@@ -25,12 +25,9 @@ class FollowService(
     private val discovery: FeedDiscovery,
     private val ingest: EntryIngestService,
     private val refresh: FeedRefreshService,
-    private val details: FeedDetailsMapper,
     private val config: MicrosubConfig,
 ) {
     fun list(channelUid: String?): List<Map<String, Any>> = feeds.listByChannel(channels.require(channelUid).id).map(::view)
-
-    fun refreshStale(channelUid: String?): Int = refresh.refreshStale(channels.require(channelUid).id)
 
     fun follow(
         channelUid: String?,
@@ -73,16 +70,12 @@ class FollowService(
     private fun normalize(url: String?): String =
         url?.let(MicrosubUrls::fromUserInput) ?: throw MicrosubError.invalidRequest("The 'url' parameter must be a URL")
 
-    private fun view(feed: Feed): Map<String, Any> {
-        val view = details.of(feed)
-        return jf2 {
+    private fun view(feed: Feed): Map<String, Any> =
+        jf2 {
             this["type"] = "feed"
-            this["url"] = view.url
-            this["name"] = view.name
-            this["photo"] = view.photo
-            this["description"] = view.description
-            this["format"] = view.format
-            this["websub"] = view.websub
+            this["url"] = feed.url
+            this["name"] = feed.name
+            this["photo"] = feed.photo
+            this["description"] = feed.description
         }
-    }
 }

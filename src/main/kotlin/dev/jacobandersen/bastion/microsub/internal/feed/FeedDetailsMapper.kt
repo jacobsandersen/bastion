@@ -6,8 +6,7 @@ import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionState
 import org.springframework.stereotype.Component
 
 /**
- * Derives the non-spec feed details (format, WebSub state). One implementation serves both the legacy `format` and
- * `websub` fields on Microsub feed objects and the `reader` API's feed details.
+ * Derives the non-spec feed details (format, WebSub state) for the `reader` API's feed details.
  */
 @Component
 class FeedDetailsMapper(
