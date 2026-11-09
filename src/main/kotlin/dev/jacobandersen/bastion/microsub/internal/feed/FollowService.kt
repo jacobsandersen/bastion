@@ -16,7 +16,7 @@ import java.time.Instant
  * `action=follow` and `action=unfollow`. Following fetches the feed once (so
  * a URL with no feed is rejected up front), backfills its current entries and
  * subscribes over WebSub when the feed advertises a hub. Unfollowing keeps
- * the entries already in the channel; retention removes them once read.
+ * the entries already in the channel.
  */
 @Service
 class FollowService(

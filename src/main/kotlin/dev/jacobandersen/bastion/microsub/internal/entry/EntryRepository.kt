@@ -54,8 +54,7 @@ class EntryRepository(
      * refresh, so re-fetching a feed never resurrects removed entries or
      * marks read ones unread. An undated entry keeps the time it was first
      * seen ([dated] false) instead of moving to the top on every fetch.
-     * Every upsert records when the entry was last seen, which retention uses
-     * to keep entries that are still in their feed. Returns whether the entry is new.
+     * Every upsert records when the entry was last seen. Returns whether the entry is new.
      */
     fun upsert(
         channelId: UUID,
@@ -104,7 +103,7 @@ class EntryRepository(
             .query { rs, _ -> rs.getBoolean("inserted") }
             .single()
 
-    /** Where an entry sits in the timeline now; null once it has been purged. */
+    /** Where an entry sits in the timeline now; null once the entry no longer exists. */
     fun cursorOf(id: UUID): Cursor? =
         jdbc
             .sql("select created_at, published from microsub_entries where id = :id")
@@ -250,17 +249,6 @@ class EntryRepository(
             .sql("delete from microsub_entries where author_url = :author and (cast(:channel as uuid) is null or channel_id = :channel)")
             .param("channel", channelId)
             .param("author", authorUrl)
-            .update()
-
-    /**
-     * Deletes read or removed entries last seen before [cutoff]. Entries still
-     * in their feed are seen on every fetch, so they are never purged and a
-     * later fetch cannot bring them back unread.
-     */
-    fun purge(cutoff: Instant): Int =
-        jdbc
-            .sql("delete from microsub_entries where (is_read or removed_at is not null) and last_seen_at < :cutoff")
-            .param("cutoff", Timestamp.from(cutoff))
             .update()
 
     @Suppress("UNCHECKED_CAST")

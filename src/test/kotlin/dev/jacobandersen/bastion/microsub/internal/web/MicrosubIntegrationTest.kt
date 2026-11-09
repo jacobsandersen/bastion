@@ -6,7 +6,7 @@ import dev.jacobandersen.bastion.indieauth.query.AccessTokenQueryService
 import dev.jacobandersen.bastion.indieauth.query.ValidatedAccessToken
 import dev.jacobandersen.bastion.microsub.internal.feed.FeedRefreshService
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedHostValidator
-import dev.jacobandersen.bastion.microsub.internal.job.EntryRetentionService
+import dev.jacobandersen.bastion.microsub.internal.job.MicrosubSchedulers
 import dev.jacobandersen.bastion.microsub.internal.moderation.BlockWebmentionPolicy
 import dev.jacobandersen.bastion.post.query.PostStateView
 import dev.jacobandersen.bastion.webmention.events.ReceivedWebmentionChangedEvent
@@ -21,6 +21,8 @@ import org.awaitility.Awaitility.await
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
+import org.jobrunr.scheduling.JobScheduler
+import org.jobrunr.storage.StorageProvider
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -89,7 +91,13 @@ class MicrosubIntegrationTest {
     lateinit var refresh: FeedRefreshService
 
     @Autowired
-    lateinit var retention: EntryRetentionService
+    lateinit var schedulers: MicrosubSchedulers
+
+    @Autowired
+    lateinit var jobScheduler: JobScheduler
+
+    @Autowired
+    lateinit var jobStorage: StorageProvider
 
     @MockitoBean
     lateinit var tokens: AccessTokenQueryService
@@ -106,6 +114,9 @@ class MicrosubIntegrationTest {
 
     private val pages = mutableMapOf<String, Pair<String, String>>()
 
+    /** Paths whose responses carry an ETag and answer a matching conditional GET with 304, like a quiet blog does. */
+    private val etagged = mutableSetOf<String>()
+
     @BeforeEach
     fun setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply<DefaultMockMvcBuilder>(springSecurity()).build()
@@ -116,11 +127,15 @@ class MicrosubIntegrationTest {
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { exchange ->
             val page = pages[exchange.requestURI.path]
+            val etag = page?.let { "\"${it.second.hashCode()}\"" }
             if (page == null) {
                 exchange.sendResponseHeaders(404, -1)
+            } else if (exchange.requestURI.path in etagged && exchange.requestHeaders.getFirst("If-None-Match") == etag) {
+                exchange.sendResponseHeaders(304, -1)
             } else {
                 val bytes = page.second.toByteArray()
                 exchange.responseHeaders.add("Content-Type", page.first)
+                if (exchange.requestURI.path in etagged) exchange.responseHeaders.add("ETag", etag)
                 exchange.sendResponseHeaders(200, bytes.size.toLong())
                 exchange.responseBody.use { it.write(bytes) }
             }
@@ -602,30 +617,89 @@ class MicrosubIntegrationTest {
     }
 
     @Test
-    fun `purges read entries only after they drop out of their feed`() {
-        pages["/kept"] =
+    fun `keeps read entries however long they have gone unseen`() {
+        pages["/idle"] =
             "text/html" to hFeed(hEntry("p1", "Dropped", "https://alice.example/"), hEntry("p2", "Kept", "https://alice.example/"))
         val channel = newChannel()
-        follow(channel, "/kept")
+        follow(channel, "/idle")
         assertEquals(0, unread(channel), "backfilled entries start read")
 
-        val longAgo = java.sql.Timestamp.from(Instant.now().minus(Duration.ofDays(60)))
+        ageEntries(channel, Duration.ofDays(90))
+        pages["/idle"] = "text/html" to hFeed(hEntry("p2", "Kept", "https://alice.example/"))
+        refresh.refreshClaimed(feedId(channel))
+
+        assertEquals(listOf("$base/p2", "$base/p1"), urls(timeline(channel)), "an entry that left its feed stays")
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(0, unread(channel), "a re-fetch does not bring a kept entry back unread")
+    }
+
+    @Test
+    fun `a quiet feed answering 304 loses and resurrects nothing`() {
+        etagged += "/quiet"
+        pages["/quiet"] = "text/html" to hFeed(hEntry("p1", "One", "https://alice.example/"), hEntry("p2", "Two", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/quiet")
+        assertEquals(0, unread(channel), "backfilled entries start read")
+        val p1 = timeline(channel)["items"].toList().first { it["url"].asString() == "$base/p1" }["_id"].asString()
+        action("action" to "timeline", "method" to "remove", "channel" to channel, "entry" to p1).andExpect(status().isOk)
+
+        ageEntries(channel, Duration.ofDays(60))
+        refresh.refreshClaimed(feedId(channel)) // the conditional GET answers 304, so nothing is ingested
+        assertEquals(0, entryRows(channel, "last_seen_at > now() - interval '1 day'"), "a 304 leaves last_seen_at alone")
+        assertEquals(2, entryRows(channel), "removed and read entries are still stored")
+
+        pages["/quiet"] =
+            "text/html" to
+            hFeed(
+                hEntry("p1", "One", "https://alice.example/"),
+                hEntry("p2", "Two", "https://alice.example/"),
+                hEntry("p3", "Three", "https://alice.example/"),
+            )
+        refresh.refreshClaimed(feedId(channel))
+
+        assertEquals(1, unread(channel), "only the new post is unread")
+        assertEquals(listOf("$base/p3", "$base/p2"), urls(timeline(channel)), "the removed entry stays removed")
+    }
+
+    @Test
+    fun `does not register the removed retention job and deletes a leftover one`() {
+        val leftover = MicrosubSchedulers.REMOVED_RETENTION_JOB_ID
+        jobScheduler.scheduleRecurrently(leftover, Duration.ofHours(6)) { refresh.pollDue() }
+        assertTrue(jobStorage.recurringJobs.any { it.id == leftover }, "the leftover job is persisted")
+
+        schedulers.schedule()
+
+        val ids = jobStorage.recurringJobs.map { it.id }
+        assertFalse(leftover in ids, "the leftover job is deleted")
+        assertTrue(MicrosubSchedulers.POLL_JOB_ID in ids)
+        schedulers.schedule() // a second run, with nothing left to delete, is harmless
+        assertFalse(leftover in jobStorage.recurringJobs.map { it.id })
+    }
+
+    private fun ageEntries(
+        channel: String,
+        age: Duration,
+    ) {
+        val at = java.sql.Timestamp.from(Instant.now().minus(age))
         jdbc
             .sql(
                 "update microsub_entries set updated_at = :at, last_seen_at = :at " +
                     "where channel_id = (select id from microsub_channels where uid = :uid)",
-            ).param("at", longAgo)
+            ).param("at", at)
             .param("uid", channel)
             .update()
-        pages["/kept"] = "text/html" to hFeed(hEntry("p2", "Kept", "https://alice.example/"))
-        refresh.refreshClaimed(feedId(channel))
-
-        retention.purge()
-
-        assertEquals(listOf("$base/p2"), urls(timeline(channel)))
-        refresh.refreshClaimed(feedId(channel))
-        assertEquals(0, unread(channel), "a re-fetch does not bring the kept entry back unread")
     }
+
+    private fun entryRows(
+        channel: String,
+        condition: String = "true",
+    ): Int =
+        jdbc
+            .sql(
+                "select count(*) from microsub_entries where $condition and channel_id = (select id from microsub_channels where uid = :uid)",
+            ).param("uid", channel)
+            .query(Int::class.java)
+            .single()
 
     @Test
     fun `refresh fetches only stale feeds of the channel without waiting for the fetch`() {

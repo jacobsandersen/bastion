@@ -81,7 +81,6 @@ bastion:
     max-body-bytes: ${BASTION_MICROSUB_MAX_BODY_BYTES:5242880}
     max-items-per-fetch: ${BASTION_MICROSUB_MAX_ITEMS_PER_FETCH:50}
     backfill-as-read: ${BASTION_MICROSUB_BACKFILL_AS_READ:true}
-    retention: ${BASTION_MICROSUB_RETENTION:30d}
     default-limit: ${BASTION_MICROSUB_DEFAULT_LIMIT:20}
     max-limit: ${BASTION_MICROSUB_MAX_LIMIT:100}
   cors:
