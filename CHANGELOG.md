@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.50](https://github.com/jacobsandersen/bastion/compare/v1.3.49...v1.3.50) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **microsub:** clients that only know the legacy routes degrade to plain Microsub.
+
+### Features
+
+* **microsub:** keep deleted entries as markers until their feed drops them ([#137](https://github.com/jacobsandersen/bastion/issues/137)) ([3b56d1e](https://github.com/jacobsandersen/bastion/commit/3b56d1e01901b6ab66309e950000fe1302b4b3c8))
+* **microsub:** remove the legacy reader extras and mark_read in arrival order ([#138](https://github.com/jacobsandersen/bastion/issues/138)) ([1fdf866](https://github.com/jacobsandersen/bastion/commit/1fdf8663a75e3d40ee62d614f9a8af87b5f17f82))
+* **reader:** add entries/check to report which cached entries are gone ([#135](https://github.com/jacobsandersen/bastion/issues/135)) ([ccb0f01](https://github.com/jacobsandersen/bastion/commit/ccb0f0175ac935ca543b8545b74177886dc99f7b))
+
 ## [1.3.49](https://github.com/jacobsandersen/bastion/compare/v1.3.48...v1.3.49) (2026-11-09)
 
 
