@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.microsub.internal.fetch
 
+import com.rometools.rome.feed.synd.SyndContent
 import com.rometools.rome.feed.synd.SyndEntry
 import com.rometools.rome.feed.synd.SyndFeed
 import com.rometools.rome.io.SyndFeedInput
@@ -79,7 +80,7 @@ object XmlFeedParser {
             )?.let { MicrosubUrls.resolve(base, it) }
         val body = entry.contents.orEmpty().firstOrNull { !it.value.isNullOrBlank() }
         val description = entry.description?.value?.takeIf { it.isNotBlank() }
-        val html = body?.value ?: description
+        val html = body?.let(::bodyHtml)?.takeIf { it.isNotBlank() } ?: description
         val isText = (body ?: entry.description)?.type?.lowercase()?.let { it == "text" || it == "text/plain" } ?: false
         val content = if (isText) HtmlSanitizer.content(null, html, url ?: base) else HtmlSanitizer.content(html, null, url ?: base)
         val contentText = content?.get("text") as? String
@@ -139,6 +140,10 @@ object XmlFeedParser {
             }
         return data.takeIf { url != null || content != null || name != null }
     }
+
+    /** Atom `type="xhtml"` arrives as namespaced XML; everything else is already markup or text. */
+    private fun bodyHtml(body: SyndContent): String? =
+        if (body.type.equals("xhtml", ignoreCase = true)) XhtmlContent.normalize(body.value) else body.value
 
     private fun squash(text: String) = text.replace(Regex("\\s+"), " ").trim()
 }

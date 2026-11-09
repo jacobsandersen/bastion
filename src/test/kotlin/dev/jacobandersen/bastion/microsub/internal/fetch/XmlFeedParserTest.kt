@@ -72,6 +72,95 @@ class XmlFeedParserTest {
     }
 
     @Test
+    fun `keeps breaks and links in Atom xhtml content with a prefixed namespace`() {
+        val feed = XmlFeedParser.parse(resource("tantek-xhtml-entry.atom"), "https://tantek.com/updates.atom", 50)
+
+        val item = feed.items.single()
+        val content = item.data["content"] as Map<*, *>
+        val html = content["html"] as String
+        assertTrue(html.startsWith("faschadenfreude, noun<br><br>definition: joy"), html)
+        assertTrue(html.contains("""<a href="https://www.vanityfair.com/story/midterms-republican-watch-party-blue-wave""""), html)
+        assertTrue(html.contains("#<span>blueWave</span> #<span>FAFO</span>"), html)
+        assertFalse(html.contains("default:"), html)
+        assertFalse(html.contains("<div"), "the wrapping div is not part of the content")
+        val text = content["text"] as String
+        assertTrue(text.startsWith("faschadenfreude, noun\n\ndefinition: joy"), text)
+        assertTrue(text.contains("see also FAFO.\n\ninspiration:\n* https://www.vanityfair.com/"), text)
+        assertTrue(text.endsWith("#blueWave #FAFO"), text)
+        assertNull(item.data["name"], "the xhtml title is an empty div")
+    }
+
+    @Test
+    fun `reads Atom xhtml content with an unprefixed default namespace or none`() {
+        val defaultNamespace =
+            atomWithContent("""<div xmlns="http://www.w3.org/1999/xhtml"><p>One</p><p>Two <a href="/x">link</a><br/>three</p></div>""")
+        val noNamespace = atomWithContent("<div><p>One</p><p>Two <a href=\"/x\">link</a><br/>three</p></div>")
+
+        listOf(defaultNamespace, noNamespace).forEach { atom ->
+            val content =
+                XmlFeedParser
+                    .parse(
+                        atom.toByteArray(),
+                        "https://dee.example/atom",
+                        50,
+                    ).items
+                    .single()
+                    .data["content"] as Map<*, *>
+            assertEquals("""<p>One</p><p>Two <a href="https://dee.example/x">link</a><br>three</p>""", content["html"])
+            assertEquals("One\n\nTwo link\nthree", content["text"])
+        }
+    }
+
+    @Test
+    fun `reads Atom xhtml content when the prefix is declared on the div or the feed`() {
+        val onDiv = atomWithContent("""<h:div xmlns:h="http://www.w3.org/1999/xhtml"><h:p>One</h:p><h:ul><h:li>a</h:li></h:ul></h:div>""")
+        val onFeed =
+            atomWithContent("""<x:div><x:p>One</x:p><x:ul><x:li>a</x:li></x:ul></x:div>""")
+                .replace("<feed ", """<feed xmlns:x="http://www.w3.org/1999/xhtml" """)
+
+        listOf(onDiv, onFeed).forEach { atom ->
+            val content =
+                XmlFeedParser
+                    .parse(
+                        atom.toByteArray(),
+                        "https://dee.example/atom",
+                        50,
+                    ).items
+                    .single()
+                    .data["content"] as Map<*, *>
+            assertEquals("<p>One</p><ul><li>a</li></ul>", content["html"])
+        }
+    }
+
+    @Test
+    fun `does not treat other namespaces in Atom xhtml content as html`() {
+        val atom = atomWithContent("""<div xmlns="http://www.w3.org/1999/xhtml">Hi<s:br xmlns:s="urn:other"/>there <b>you</b></div>""")
+
+        val content =
+            XmlFeedParser
+                .parse(atom.toByteArray(), "https://dee.example/atom", 50)
+                .items
+                .single()
+                .data["content"] as Map<*, *>
+
+        assertEquals("Hithere <b>you</b>", content["html"])
+    }
+
+    private fun resource(name: String): ByteArray = javaClass.getResourceAsStream("/microsub/$name")!!.readAllBytes()
+
+    private fun atomWithContent(xhtml: String) =
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Dee</title><id>urn:dee</id><updated>2026-11-02T00:00:00Z</updated>
+          <entry>
+            <id>tag:dee,2026:1</id><title>Dee</title><link href="https://dee.example/1"/><updated>2026-11-02T00:00:00Z</updated>
+            <content type="xhtml">$xhtml</content>
+          </entry>
+        </feed>
+        """.trimIndent()
+
+    @Test
     fun `refuses DOCTYPE declarations`() {
         val xxe =
             """
