@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.indieauth.internal.type
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter
 import tools.jackson.databind.PropertyNamingStrategies
 import tools.jackson.databind.annotation.JsonNaming
 
@@ -27,4 +28,6 @@ data class AuthorizationServerMetadata(
     val codeChallengeMethodsSupported: List<String> = listOf("S256"),
     val authorizationResponseIssParameterSupported: Boolean = true,
     val userinfoEndpoint: String? = null,
+    /** Vendor-namespaced members contributed by other modules, serialized at the top level. */
+    @get:JsonAnyGetter val extensions: Map<String, Any> = emptyMap(),
 )

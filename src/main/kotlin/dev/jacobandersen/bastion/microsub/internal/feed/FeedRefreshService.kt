@@ -1,12 +1,12 @@
 package dev.jacobandersen.bastion.microsub.internal.feed
 
+import dev.jacobandersen.bastion.microsub.events.EntryEvents
 import dev.jacobandersen.bastion.microsub.internal.channel.ChannelRepository
 import dev.jacobandersen.bastion.microsub.internal.config.MicrosubConfig
 import dev.jacobandersen.bastion.microsub.internal.entry.EntryIngestService
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedDiscovery
 import dev.jacobandersen.bastion.microsub.internal.fetch.FeedLoad
 import dev.jacobandersen.bastion.microsub.internal.fetch.ParsedFeed
-import dev.jacobandersen.bastion.microsub.internal.live.EntryEvents
 import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionService
 import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionState
 import io.github.oshai.kotlinlogging.KotlinLogging

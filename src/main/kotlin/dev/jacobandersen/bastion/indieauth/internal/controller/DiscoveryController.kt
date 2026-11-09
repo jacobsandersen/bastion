@@ -4,6 +4,7 @@ import dev.jacobandersen.bastion.indieauth.internal.IndieAuthEndpoints
 import dev.jacobandersen.bastion.indieauth.internal.scope.ScopeCatalog
 import dev.jacobandersen.bastion.indieauth.internal.type.AuthorizationServerMetadata
 import dev.jacobandersen.bastion.indieauth.internal.util.Issuers
+import dev.jacobandersen.bastion.indieauth.metadata.IndieAuthMetadataContributor
 import jakarta.annotation.PostConstruct
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController
 class DiscoveryController(
     @Value($$"${bastion.public-url}") private val publicUrl: String,
     private val scopeCatalog: ScopeCatalog,
+    private val metadataContributors: List<IndieAuthMetadataContributor>,
 ) {
     @PostConstruct
     fun validateIssuer() {
@@ -42,6 +44,7 @@ class DiscoveryController(
             scopesSupported = scopeCatalog.allowedScopes.sorted(),
             grantTypesSupported = listOf("authorization_code", "refresh_token"),
             userinfoEndpoint = baseUrl() + IndieAuthEndpoints.USERINFO,
+            extensions = extensions(),
         )
 
     @GetMapping(
@@ -55,6 +58,9 @@ class DiscoveryController(
         produces = [MediaType.TEXT_PLAIN_VALUE],
     )
     fun tokenEndpoint(): String = baseUrl() + IndieAuthEndpoints.TOKEN
+
+    /** Vendor-namespaced members other modules add to the metadata. */
+    private fun extensions(): Map<String, Any> = metadataContributors.fold(emptyMap()) { all, c -> all + c.metadata(baseUrl()) }
 
     private fun issuer(): String = Issuers.issuer(publicUrl)
 

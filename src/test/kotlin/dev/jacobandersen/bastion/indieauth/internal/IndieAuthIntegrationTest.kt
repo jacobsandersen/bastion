@@ -112,6 +112,7 @@ class IndieAuthIntegrationTest {
             .andExpect(jsonPath("$.code_challenge_methods_supported[0]").value("S256"))
             .andExpect(jsonPath("$.authorization_response_iss_parameter_supported").value(true))
             .andExpect(jsonPath("$.grant_types_supported").isArray())
+            .andExpect(jsonPath("$.bastion_reader_api").value("https://bastion.test/reader/v1"))
             .andExpect(
                 jsonPath(
                     "$.scopes_supported",
