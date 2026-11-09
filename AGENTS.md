@@ -64,8 +64,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
   `GET /reader/v1/events`, `GET /reader/v1/channels/{uid}/feeds` and `POST /reader/v1/channels/{uid}/entries/check`
   (up to 500 cached entry ids; answers `gone`: removed/marked, hard-deleted, foreign or malformed ids; JSON or form
   body; feature `entry-check`; backed by `microsub::microsub-entries`). It checks the Microsub `read` scope (Bearer header
-  only) and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
-  feed fields still work and share its code; they are removed in a later step.
+  only) and defines no scope of its own. Microsub serves none of these extras: there is no `/microsub/refresh` or
+  `/microsub/events`, and followed-feed objects carry only `type,url,name,photo,description`.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
   IndieAuth and Micropub. Everything else is internal. The Micropub multipart filter lives in Micropub, not `config`.
@@ -300,8 +300,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
   only triggers a re-fetch; the pushed body is never ingested. Bastion requests leases via
   `bastion.websub.subscriber.*`, and `websub-subscription-renewal` renews them.
 - Paging: an opaque cursor over `(created_at desc, published desc, id desc)` (`entry/Cursor.kt`), so late-arriving
-  entries with old `published` dates are never skipped by `before` polls; `mark_read` with `last_read_entry` still uses
-  publish order. Pre-arrival-order `published:id` cursors resolve via the entry's current position. Pages are always newest first,
+  entries with old `published` dates are never skipped by `before` polls; `mark_read` with `last_read_entry` marks everything at or
+  before the anchor in that same order. Pre-arrival-order `published:id` cursors resolve via the entry's current position. Pages are always newest first,
   including `before`-only polls: those return the newest page and an `after` when more new entries exist (the spec's
   worked example), never the entries nearest the cursor. `before` is returned only when items are, and `after`
   whenever more matching items were not returned. Undated entries keep their first-seen time and are served with it

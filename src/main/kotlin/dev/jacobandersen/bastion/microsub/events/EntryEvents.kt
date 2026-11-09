@@ -15,7 +15,7 @@ private val logger = KotlinLogging.logger {}
  * Tells connected readers when a feed fetch stored new entries, as server-sent events. In-process only: an event
  * reaches the clients connected to the replica that ran the fetch, so with several replicas a client may see only
  * some of them and should keep polling as a fallback. Published to peer modules (`microsub::microsub-events`) so the
- * `reader` module can serve the stream; the legacy `/microsub/events` route uses the same hub.
+ * `reader` module can serve the stream.
  */
 @Component
 class EntryEvents {

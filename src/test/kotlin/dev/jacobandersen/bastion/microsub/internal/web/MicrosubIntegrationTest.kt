@@ -278,12 +278,13 @@ class MicrosubIntegrationTest {
             ).andExpect(status().isOk)
             .andExpect(jsonPath("$.type").value("feed"))
             .andExpect(jsonPath("$.name").value("Test feed"))
-            .andExpect(jsonPath("$.format").value("mf2"))
+            .andExpect(jsonPath("$.format").doesNotExist()) // reader-API detail, not a Microsub feed field
             .andExpect(jsonPath("$.websub").doesNotExist())
         mockMvc
             .perform(get("/microsub").auth().param("action", "follow").param("channel", channel))
             .andExpect(jsonPath("$.items", hasSize<Any>(1)))
-            .andExpect(jsonPath("$.items[0].format").value("mf2"))
+            .andExpect(jsonPath("$.items[0].format").doesNotExist())
+            .andExpect(jsonPath("$.items[0].websub").doesNotExist())
 
         // Page through newest first, two at a time.
         val first =
@@ -702,70 +703,38 @@ class MicrosubIntegrationTest {
             .single()
 
     @Test
-    fun `refresh fetches only stale feeds of the channel without waiting for the fetch`() {
-        pages["/live"] = "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"))
+    fun `the extras that moved to the reader API are not served by Microsub`() {
         val channel = newChannel()
-        follow(channel, "/live")
-        pages["/live"] =
-            "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"), hEntry("p2", "Second", "https://alice.example/"))
-
-        fun requestRefresh(token: String = "readonly") = mockMvc.perform(post("/microsub/refresh").auth(token).param("channel", channel))
-
-        requestRefresh().andExpect(status().isOk).andExpect(jsonPath("$.refreshing").value(0))
-        assertEquals(0, unread(channel), "a just-fetched feed is not fetched again")
-
-        val longAgo = java.sql.Timestamp.from(Instant.now().minus(Duration.ofHours(1)))
-        jdbc.sql("update microsub_feeds set last_fetched_at = :at").param("at", longAgo).update()
-        requestRefresh().andExpect(jsonPath("$.refreshing").value(1))
-        requestRefresh().andExpect(jsonPath("$.refreshing").value(0)) // claimed by the fetch just started
-        assertEquals(0, unread(channel), "the request only queues the fetch")
-        refresh.refreshClaimed(feedId(channel)) // the job server is off in tests, so run the queued job
-        assertEquals(1, unread(channel))
-
-        mockMvc
-            .perform(post("/microsub/refresh").auth().param("channel", "nope"))
-            .andExpect(status().isBadRequest)
-        mockMvc
-            .perform(post("/microsub/refresh").param("channel", channel))
-            .andExpect(status().isUnauthorized)
+        mockMvc.perform(post("/microsub/refresh").auth().param("channel", channel)).andExpect { assertTrue(it.response.status in 400..405) }
+        mockMvc.perform(get("/microsub/events").auth("readonly")).andExpect { assertTrue(it.response.status in 400..405) }
         mockMvc
             .perform(post("/microsub").auth().param("action", "refresh").param("channel", channel))
             .andExpect(status().isBadRequest) // not an action of the Microsub endpoint
     }
 
     @Test
-    fun `streams an entries event when a fetch stores new entries`() {
-        pages["/stream"] = "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"))
+    fun `mark_read through an entry follows the timeline order, so a later arrival published earlier stays unread`() {
+        pages["/mr"] = "text/html" to hFeed(hEntry("p5", "Newest", "https://alice.example/"))
         val channel = newChannel()
-        follow(channel, "/stream")
-
-        val result = mockMvc.perform(get("/microsub/events").auth("readonly")).andReturn()
-        val response = result.response
-        await().untilAsserted { assertTrue(response.contentAsString.contains(":connected")) }
-        assertEquals("no", response.getHeader("X-Accel-Buffering"))
-        assertTrue(response.getHeader(HttpHeaders.CACHE_CONTROL).orEmpty().contains("no-cache"))
-        assertTrue(response.contentType.orEmpty().startsWith("text/event-stream"))
-
+        follow(channel, "/mr")
+        // p2 arrives after p5, so it sits above p5 in the arrival-ordered timeline, though it was published earlier.
+        pages["/mr"] =
+            "text/html" to
+            hFeed(hEntry("p5", "Newest", "https://alice.example/"), hEntry("p2", "Late", "https://alice.example/"))
         refresh.refreshClaimed(feedId(channel))
-        assertFalse(response.contentAsString.contains("event:entries"), "an unchanged fetch announces nothing")
 
-        pages["/stream"] =
-            "text/html" to hFeed(hEntry("p1", "First", "https://alice.example/"), hEntry("p2", "Second", "https://alice.example/"))
-        refresh.refreshClaimed(feedId(channel))
-        await().untilAsserted {
-            assertTrue(response.contentAsString.contains("event:entries"))
-            assertTrue(response.contentAsString.contains("data:{\"channel\":\"$channel\",\"count\":1}"))
-        }
-        assertEquals(
-            1,
-            "event:entries".toRegex().findAll(response.contentAsString).count(),
-            "only the fetch that stored a new entry is announced",
-        )
-    }
+        val page = timeline(channel)
+        assertEquals(listOf("$base/p2", "$base/p5"), urls(page))
+        assertEquals(1, unread(channel))
+        val p5 = page["items"].first { it["url"].asString() == "$base/p5" }["_id"].asString()
+        action("action" to "timeline", "method" to "mark_read", "channel" to channel, "last_read_entry" to p5).andExpect(status().isOk)
 
-    @Test
-    fun `the event stream needs a token`() {
-        mockMvc.perform(get("/microsub/events")).andExpect(status().isUnauthorized)
+        assertEquals(1, unread(channel), "p2 is above the anchor in the timeline, so it is not marked")
+        assertEquals(listOf(false, true), timeline(channel)["items"].toList().map { it["_is_read"].asBoolean() })
+
+        val p2 = page["items"].first { it["url"].asString() == "$base/p2" }["_id"].asString()
+        action("action" to "timeline", "method" to "mark_read", "channel" to channel, "last_read_entry" to p2).andExpect(status().isOk)
+        assertEquals(0, unread(channel), "an anchor at the top marks everything below it")
     }
 
     @Test

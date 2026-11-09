@@ -433,28 +433,23 @@ class ReaderIntegrationTest {
         }
     }
 
-    // --- the legacy Microsub extras are untouched --------------------------------------------------------------------
+    // --- the legacy Microsub extras are gone -------------------------------------------------------------------------
 
     @Test
-    fun `the legacy Microsub routes and feed fields still work and agree with the reader API`() {
+    fun `the Microsub feed objects carry no reader details and the legacy routes are gone`() {
         pages["/legacy"] = "text/html" to hFeed(hEntry("p1", "First"))
         val channel = newChannel()
         follow(channel, "/legacy")
 
-        val legacy =
+        val microsub =
             json(mockMvc.perform(get("/microsub").auth().param("action", "follow").param("channel", channel)).andExpect(status().isOk))
         val reader = json(mockMvc.perform(get("/reader/v1/channels/$channel/feeds").auth()).andExpect(status().isOk))
-        assertEquals("mf2", legacy["items"][0]["format"].asString())
-        assertEquals(legacy["items"][0]["format"], reader["items"][0]["format"])
-        assertEquals(legacy["items"][0]["name"], reader["items"][0]["name"])
+        assertEquals("mf2", reader["items"][0]["format"].asString())
+        assertEquals(microsub["items"][0]["name"], reader["items"][0]["name"])
+        assertFalse(microsub["items"][0].has("format"))
+        assertFalse(microsub["items"][0].has("websub"))
 
-        mockMvc
-            .perform(post("/microsub/refresh").auth().param("channel", channel))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.refreshing").value(0))
-        mockMvc
-            .perform(post("/microsub").auth().param("action", "refresh").param("channel", channel))
-            .andExpect(status().isBadRequest) // still not an action of the Microsub endpoint
+        mockMvc.perform(post("/microsub/refresh").auth().param("channel", channel)).andExpect { assertTrue(it.response.status in 400..405) }
         // The Microsub chain still authenticates its own routes; the reader's Bearer-only rule does not leak into it.
         mockMvc.perform(get("/microsub").param("action", "channels")).andExpect(status().isUnauthorized)
     }
