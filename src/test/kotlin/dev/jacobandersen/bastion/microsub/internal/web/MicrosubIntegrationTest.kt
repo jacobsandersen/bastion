@@ -812,17 +812,27 @@ class MicrosubIntegrationTest {
     }
 
     @Test
-    fun `the hot path indexes leave deleted entries out`() {
-        val definitions =
-            jdbc
-                .sql(
-                    "select indexname, indexdef from pg_indexes where tablename = 'microsub_entries' and indexname in ('idx_microsub_entry_unread', 'idx_microsub_entry_arrival')",
-                ).query { rs, _ -> rs.getString("indexname") to rs.getString("indexdef") }
-                .list()
-                .toMap()
-        assertEquals(2, definitions.size)
-        assertTrue(definitions.getValue("idx_microsub_entry_unread").contains("WHERE ((NOT is_read) AND (removed_at IS NULL))"))
-        assertTrue(definitions.getValue("idx_microsub_entry_arrival").contains("WHERE (removed_at IS NULL)"))
+    fun `deleting an unread entry drops it from the unread count and from timeline paging`() {
+        pages["/unreadmark"] =
+            "text/html" to
+            hFeed(
+                hEntry("p1", "One", "https://alice.example/"),
+                hEntry("p2", "Two", "https://alice.example/"),
+                hEntry("p3", "Three", "https://alice.example/"),
+            )
+        val channel = newChannel()
+        follow(channel, "/unreadmark")
+        val ids = listOf("p1", "p2", "p3").map { entryId(channel, it) }
+        action("action" to "timeline", "method" to "mark_unread", "channel" to channel, "entry[]" to ids[0])
+            .andExpect(status().isOk)
+        action("action" to "timeline", "method" to "mark_unread", "channel" to channel, "entry[]" to ids[1])
+            .andExpect(status().isOk)
+        assertEquals(2, unread(channel))
+
+        remove(channel, ids[0])
+
+        assertEquals(1, unread(channel), "the deleted unread entry no longer counts")
+        assertEquals(listOf("$base/p3", "$base/p2"), urls(timeline(channel)), "and it is not paged")
     }
 
     @Test
