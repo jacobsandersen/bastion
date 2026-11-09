@@ -57,11 +57,13 @@ When updating this file, preserve this bar for all agents and keep entries conci
   `url::ContentUrlMatcher` for own-content checks, not `post::post-url`.
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
-- `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub) and `microsub::microsub-feeds` (feed
-  details and stale-feed refresh) only for the `reader` module; the rest is internal. See the Microsub section.
+- `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub), `microsub::microsub-feeds` (feed
+  details and stale-feed refresh) and `microsub::microsub-entries` (entry-status check) only for the `reader` module; the rest is internal. See the Microsub section.
 - `reader` (`/reader/v1`) has no public surface. It owns the extras Bastion's own client needs beyond the Microsub spec:
   the public capability document (`GET /reader/v1`), `POST /reader/v1/channels/{uid}/refresh`,
-  `GET /reader/v1/events` and `GET /reader/v1/channels/{uid}/feeds`. It checks the Microsub `read` scope (Bearer header
+  `GET /reader/v1/events`, `GET /reader/v1/channels/{uid}/feeds` and `POST /reader/v1/channels/{uid}/entries/check`
+  (up to 500 cached entry ids; answers `gone`: removed/marked, hard-deleted, foreign or malformed ids; JSON or form
+  body; feature `entry-check`; backed by `microsub::microsub-entries`). It checks the Microsub `read` scope (Bearer header
   only) and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
   feed fields still work and share its code; they are removed in a later step.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.

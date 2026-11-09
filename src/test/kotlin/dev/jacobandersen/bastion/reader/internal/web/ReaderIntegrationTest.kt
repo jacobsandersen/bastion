@@ -189,8 +189,8 @@ class ReaderIntegrationTest {
             .andExpect(jsonPath("$.api").value("bastion-reader"))
             .andExpect(jsonPath("$.version").value(1))
             .andExpect(jsonPath("$.microsub_endpoint").value("https://bastion.test/microsub"))
-            .andExpect(jsonPath("$.features", hasSize<Any>(3)))
-            .andExpect(jsonPath("$.features", hasItems("refresh", "events", "feed-details")))
+            .andExpect(jsonPath("$.features", hasSize<Any>(4)))
+            .andExpect(jsonPath("$.features", hasItems("refresh", "events", "feed-details", "entry-check")))
             .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=300, public"))
         // A browser client on another origin reads it too, and so can a token holder.
         mockMvc
@@ -209,6 +209,11 @@ class ReaderIntegrationTest {
             listOf(
                 { post("/reader/v1/channels/$channel/refresh") },
                 { get("/reader/v1/channels/$channel/feeds") },
+                {
+                    post(
+                        "/reader/v1/channels/$channel/entries/check",
+                    ).contentType(MediaType.APPLICATION_JSON).content("""{"entry":["x"]}""")
+                },
                 { get("/reader/v1/events").accept(MediaType.TEXT_EVENT_STREAM) },
             )
         routes.forEach { route ->
@@ -310,6 +315,96 @@ class ReaderIntegrationTest {
             .perform(get("/reader/v1/channels/nope/feeds").auth())
             .andExpect(status().isNotFound)
             .andExpect(jsonPath("$.error").value("not_found"))
+    }
+
+    // --- entry check -----------------------------------------------------------------------------------------------
+
+    private fun entryIds(channel: String): List<String> =
+        json(mockMvc.perform(get("/microsub").auth().param("action", "timeline").param("channel", channel)))["items"]
+            .toList()
+            .map { it["_id"].asString() }
+
+    private fun check(
+        channel: String,
+        vararg ids: String,
+    ): ResultActions =
+        mockMvc.perform(
+            post("/reader/v1/channels/$channel/entries/check")
+                .auth()
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(mapOf("entry" to ids.toList()))),
+        )
+
+    private fun gone(
+        channel: String,
+        vararg ids: String,
+    ): List<String> = json(check(channel, *ids).andExpect(status().isOk))["gone"].toList().map { it.asString() }
+
+    @Test
+    fun `the entry check reports removed, hard-deleted, foreign and malformed ids as gone`() {
+        pages["/check"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        pages["/other"] = "text/html" to hFeed(hEntry("p4", "Four"))
+        val channel = newChannel()
+        val otherChannel = newChannel()
+        follow(channel, "/check")
+        follow(otherChannel, "/other")
+        val (kept, removed, deleted) = entryIds(channel)
+        val foreign = entryIds(otherChannel).single()
+
+        // `remove` marks the row; the row stays, but the entry is gone for the client.
+        mockMvc
+            .perform(
+                post(
+                    "/microsub",
+                ).auth().param("action", "timeline").param("method", "remove").param("channel", channel).param("entry", removed),
+            ).andExpect(status().isOk)
+        jdbc.sql("delete from microsub_entries where id = :id").param("id", UUID.fromString(deleted)).update()
+        val never = UUID.randomUUID().toString()
+
+        assertEquals(
+            listOf(removed, deleted, never, foreign, "not-an-id"),
+            gone(channel, kept, removed, deleted, never, foreign, "not-an-id"),
+        )
+        assertEquals(emptyList<String>(), gone(channel, kept))
+        assertEquals(listOf(removed), gone(channel, removed, kept, removed, " $kept "), "duplicates collapse, whitespace is trimmed")
+        assertEquals(emptyList<String>(), gone(otherChannel, foreign))
+    }
+
+    @Test
+    fun `the entry check accepts form-encoded ids and validates its input`() {
+        pages["/validate"] = "text/html" to hFeed(hEntry("p1", "One"))
+        val channel = newChannel()
+        follow(channel, "/validate")
+        val id = entryIds(channel).single()
+        val missing = UUID.randomUUID().toString()
+
+        fun form(vararg params: Pair<String, String>) =
+            post("/reader/v1/channels/$channel/entries/check").auth().contentType(MediaType.APPLICATION_FORM_URLENCODED).also { request ->
+                params.forEach { (name, value) -> request.param(name, value) }
+            }
+
+        mockMvc
+            .perform(form("entry[]" to id, "entry[]" to missing))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.gone[0]").value(missing))
+            .andExpect(jsonPath("$.gone", hasSize<Any>(1)))
+        mockMvc.perform(form("entry" to missing)).andExpect(status().isOk).andExpect(jsonPath("$.gone[0]").value(missing))
+
+        mockMvc.perform(form()).andExpect(status().isBadRequest).andExpect(jsonPath("$.error").value("invalid_request"))
+        check(channel).andExpect(status().isBadRequest).andExpect(jsonPath("$.error").value("invalid_request"))
+        mockMvc
+            .perform(
+                post("/reader/v1/channels/$channel/entries/check").auth().contentType(MediaType.APPLICATION_JSON).content("{}"),
+            ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value("invalid_request"))
+
+        val max = List(500) { UUID.randomUUID().toString() }.toTypedArray()
+        assertEquals(500, gone(channel, *max).size)
+        check(channel, *max, UUID.randomUUID().toString())
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value("invalid_request"))
+
+        check("nope", id).andExpect(status().isNotFound).andExpect(jsonPath("$.error").value("not_found"))
     }
 
     // --- live stream -----------------------------------------------------------------------------------------------
