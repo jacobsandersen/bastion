@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.49](https://github.com/jacobsandersen/bastion/compare/v1.3.48...v1.3.49) (2026-11-09)
+
+
+### Bug Fixes
+
+* **microsub:** keep prefixed Atom xhtml markup and line breaks in entry text ([#132](https://github.com/jacobsandersen/bastion/issues/132)) ([53fd9a0](https://github.com/jacobsandersen/bastion/commit/53fd9a069e3aa6a917fed5e4639f86cb479848d4))
+* **microsub:** remove automatic purging of old entries ([#134](https://github.com/jacobsandersen/bastion/issues/134)) ([d604813](https://github.com/jacobsandersen/bastion/commit/d60481398b9db8cf22370db1c90fc83339216ef0))
+
 ## [1.3.48](https://github.com/jacobsandersen/bastion/compare/v1.3.47...v1.3.48) (2026-11-09)
 
 
