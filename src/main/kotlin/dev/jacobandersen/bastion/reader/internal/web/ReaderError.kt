@@ -18,6 +18,8 @@ class ReaderError(
         fun insufficientScope(scope: String) =
             ReaderError(HttpStatus.FORBIDDEN, "insufficient_scope", "This request requires the '$scope' scope")
 
+        fun invalidRequest(description: String) = ReaderError(HttpStatus.BAD_REQUEST, "invalid_request", description)
+
         fun channelNotFound(uid: String) = ReaderError(HttpStatus.NOT_FOUND, "not_found", "Channel '$uid' does not exist")
     }
 }

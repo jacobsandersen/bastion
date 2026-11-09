@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.reader.internal.web
 
+import dev.jacobandersen.bastion.microsub.entries.EntryStatusQueryService
 import dev.jacobandersen.bastion.microsub.events.EntryEvents
 import dev.jacobandersen.bastion.microsub.feeds.FeedDetails
 import dev.jacobandersen.bastion.microsub.feeds.FeedRefreshCommandService
@@ -18,7 +19,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Duration
@@ -26,7 +29,7 @@ import java.time.Duration
 private val logger = KotlinLogging.logger {}
 
 /**
- * Bastion's reader API: the capability document, on-demand refresh, the live entries stream and feed details.
+ * Bastion's reader API: the capability document, on-demand refresh, the live entries stream, feed details and the entry check.
  * Everything except the capability document needs a Bearer token with the Microsub `read` scope.
  */
 @RestController
@@ -36,6 +39,7 @@ class ReaderController(
     private val feedState: FeedStateQueryService,
     private val refreshCommands: FeedRefreshCommandService,
     private val events: EntryEvents,
+    private val entryStatus: EntryStatusQueryService,
 ) {
     private val capabilities =
         ReaderCapabilities(
@@ -80,6 +84,34 @@ class ReaderController(
         return mapOf("items" to feeds.map(::view))
     }
 
+    /**
+     * Which of the entry ids a client has cached are gone from the channel (removed, hard-deleted or never there), so
+     * it can drop them. Authoritative whatever removed the entry. JSON `{"entry": [...]}`.
+     */
+    @PostMapping("/channels/{uid}/entries/check", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun checkEntries(
+        @PathVariable uid: String,
+        @RequestBody body: EntryCheckRequest,
+    ): Map<String, List<String>> = check(uid, body.entry)
+
+    /** The same check with form-encoded `entry[]` (or `entry`) values, like the Microsub endpoint takes. */
+    @PostMapping("/channels/{uid}/entries/check", consumes = [MediaType.APPLICATION_FORM_URLENCODED_VALUE])
+    fun checkEntriesForm(
+        @PathVariable uid: String,
+        @RequestParam("entry[]", required = false) bracketed: List<String>?,
+        @RequestParam("entry", required = false) plain: List<String>?,
+    ): Map<String, List<String>> = check(uid, (bracketed.orEmpty() + plain.orEmpty()))
+
+    private fun check(
+        uid: String,
+        ids: List<String>?,
+    ): Map<String, List<String>> {
+        requireScope()
+        if (ids.isNullOrEmpty()) throw ReaderError.invalidRequest("'entry' must list at least one entry id")
+        if (ids.size > MAX_CHECK_IDS) throw ReaderError.invalidRequest("At most $MAX_CHECK_IDS entry ids can be checked at once")
+        return mapOf("gone" to (entryStatus.gone(uid, ids) ?: throw ReaderError.channelNotFound(uid)))
+    }
+
     private fun view(feed: FeedDetails): Map<String, String> =
         buildMap {
             put("url", feed.url)
@@ -120,5 +152,6 @@ class ReaderController(
 
     private companion object {
         val CAPABILITIES_MAX_AGE: Duration = Duration.ofMinutes(5)
+        const val MAX_CHECK_IDS = 500
     }
 }

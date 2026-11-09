@@ -11,3 +11,8 @@ data class ReaderCapabilities(
     val microsubEndpoint: String,
     val features: List<String>,
 )
+
+/** The body of `POST /reader/v1/channels/{uid}/entries/check`. */
+data class EntryCheckRequest(
+    val entry: List<String>? = null,
+)

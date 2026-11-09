@@ -219,6 +219,21 @@ class EntryRepository(
             .update()
     }
 
+    /** The subset of [ids] that are entries of the channel and not removed. */
+    fun liveIds(
+        channelId: UUID,
+        ids: Collection<UUID>,
+    ): Set<UUID> {
+        if (ids.isEmpty()) return emptySet()
+        return jdbc
+            .sql("select id from microsub_entries where channel_id = :channel and id in (:ids) and removed_at is null")
+            .param("channel", channelId)
+            .param("ids", ids)
+            .query { rs, _ -> rs.getObject("id", UUID::class.java) }
+            .list()
+            .toSet()
+    }
+
     fun existsBySourceKey(
         channelId: UUID,
         sourceKey: String,
