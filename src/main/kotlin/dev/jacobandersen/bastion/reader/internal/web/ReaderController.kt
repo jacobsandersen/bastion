@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.reader.internal.web
 
+import dev.jacobandersen.bastion.microsub.entries.DeletedEntryQueryService
 import dev.jacobandersen.bastion.microsub.entries.EntryStatusQueryService
 import dev.jacobandersen.bastion.microsub.events.EntryEvents
 import dev.jacobandersen.bastion.microsub.feeds.FeedDetails
@@ -29,7 +30,7 @@ import java.time.Duration
 private val logger = KotlinLogging.logger {}
 
 /**
- * Bastion's reader API: the capability document, on-demand refresh, the live entries stream, feed details and the entry check.
+ * Bastion's reader API: the capability document, on-demand refresh, the live entries stream, feed details and the entry check and deleted entries.
  * Everything except the capability document needs a Bearer token with the Microsub `read` scope.
  */
 @RestController
@@ -40,6 +41,7 @@ class ReaderController(
     private val refreshCommands: FeedRefreshCommandService,
     private val events: EntryEvents,
     private val entryStatus: EntryStatusQueryService,
+    private val deleted: DeletedEntryQueryService,
 ) {
     private val capabilities =
         ReaderCapabilities(
@@ -112,6 +114,24 @@ class ReaderController(
         return mapOf("gone" to (entryStatus.gone(uid, ids) ?: throw ReaderError.channelNotFound(uid)))
     }
 
+    /**
+     * The entries the owner deleted from the channel, most recently deleted first, each with a `_deleted_at` time. A
+     * deleted entry is kept, with its content, only while its feed still lists it (so it is not added again); once
+     * the feed no longer lists it, it is permanently deleted. The `note` says so for the client to show.
+     */
+    @GetMapping("/channels/{uid}/deleted")
+    fun deletedEntries(
+        @PathVariable uid: String,
+        @RequestParam(required = false) after: String?,
+        @RequestParam(required = false) limit: Int?,
+    ): ResponseEntity<Map<String, Any>> {
+        requireScope()
+        val page = deleted.list(uid, after, limit) ?: throw ReaderError.channelNotFound(uid)
+        val body =
+            mapOf("note" to DELETED_NOTE, "items" to page.items, "paging" to listOfNotNull(page.after?.let { "after" to it }).toMap())
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body)
+    }
+
     private fun view(feed: FeedDetails): Map<String, String> =
         buildMap {
             put("url", feed.url)
@@ -153,5 +173,9 @@ class ReaderController(
     private companion object {
         val CAPABILITIES_MAX_AGE: Duration = Duration.ofMinutes(5)
         const val MAX_CHECK_IDS = 500
+
+        const val DELETED_NOTE =
+            "Deleted entries are kept only while their feed still lists them, so that they are not added again. " +
+                "Each is permanently deleted once its feed no longer lists it."
     }
 }

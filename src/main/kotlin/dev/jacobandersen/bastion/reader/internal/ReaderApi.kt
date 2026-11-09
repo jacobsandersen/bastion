@@ -19,7 +19,9 @@ object ReaderApi {
     const val FEATURE_EVENTS = "events"
     const val FEATURE_FEED_DETAILS = "feed-details"
     const val FEATURE_ENTRY_CHECK = "entry-check"
+    const val FEATURE_DELETED_ENTRIES = "deleted-entries"
 
     /** New features are additive; [VERSION] changes only for breaking changes. */
-    val FEATURES = listOf(FEATURE_REFRESH, FEATURE_EVENTS, FEATURE_FEED_DETAILS, FEATURE_ENTRY_CHECK)
+    val FEATURES =
+        listOf(FEATURE_REFRESH, FEATURE_EVENTS, FEATURE_FEED_DETAILS, FEATURE_ENTRY_CHECK, FEATURE_DELETED_ENTRIES)
 }
