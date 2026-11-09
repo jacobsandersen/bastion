@@ -189,8 +189,8 @@ class ReaderIntegrationTest {
             .andExpect(jsonPath("$.api").value("bastion-reader"))
             .andExpect(jsonPath("$.version").value(1))
             .andExpect(jsonPath("$.microsub_endpoint").value("https://bastion.test/microsub"))
-            .andExpect(jsonPath("$.features", hasSize<Any>(4)))
-            .andExpect(jsonPath("$.features", hasItems("refresh", "events", "feed-details", "entry-check")))
+            .andExpect(jsonPath("$.features", hasSize<Any>(5)))
+            .andExpect(jsonPath("$.features", hasItems("refresh", "events", "feed-details", "entry-check", "deleted-entries")))
             .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=300, public"))
         // A browser client on another origin reads it too, and so can a token holder.
         mockMvc
@@ -431,6 +431,68 @@ class ReaderIntegrationTest {
             assertTrue(response.contentAsString.contains("event:entries"))
             assertTrue(response.contentAsString.contains("data:{\"channel\":\"$channel\",\"count\":1}"))
         }
+    }
+
+    // --- deleted entries ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `lists deleted entries with a note that they are permanently deleted once their feed drops them`() {
+        pages["/del"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/del")
+        val items = json(mockMvc.perform(get("/microsub").auth().param("action", "timeline").param("channel", channel)))["items"].toList()
+        assertEquals(0, json(mockMvc.perform(get("/reader/v1/channels/$channel/deleted").auth()).andExpect(status().isOk))["items"].size())
+        for (slug in listOf("p1", "p2", "p3")) {
+            val id = items.first { it["url"].asString() == "$base/$slug" }["_id"].asString()
+            mockMvc
+                .perform(
+                    post(
+                        "/microsub",
+                    ).auth("full").param("action", "timeline").param("method", "remove").param("channel", channel).param("entry", id),
+                ).andExpect(status().isOk)
+            Thread.sleep(5)
+        }
+
+        val first =
+            json(
+                mockMvc
+                    .perform(get("/reader/v1/channels/$channel/deleted").auth().param("limit", "2"))
+                    .andExpect(status().isOk)
+                    .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                    .andExpect(jsonPath("$.note").value(org.hamcrest.Matchers.containsString("permanently deleted"))),
+            )
+        assertEquals(listOf("$base/p3", "$base/p2"), first["items"].toList().map { it["url"].asString() }, "most recently deleted first")
+        assertTrue(first["items"][0]["_deleted_at"].asString().isNotBlank())
+        assertEquals("Three", first["items"][0]["content"]["text"].asString(), "the content is still there")
+        assertEquals("$base/del", first["items"][0]["_source"]["url"].asString())
+        val after = first["paging"]["after"].asString()
+
+        val second =
+            json(
+                mockMvc
+                    .perform(
+                        get("/reader/v1/channels/$channel/deleted").auth().param("limit", "2").param("after", after),
+                    ).andExpect(status().isOk),
+            )
+        assertEquals(listOf("$base/p1"), second["items"].toList().map { it["url"].asString() })
+        assertFalse(second["paging"].has("after"), "no cursor on the last page")
+        assertTrue(second["note"].asString().contains("permanently deleted"))
+
+        // Once the feed stops listing an entry it is gone from this list too.
+        pages["/del"] = "text/html" to hFeed(hEntry("p2", "Two"), hEntry("p3", "Three"))
+        refresh.refreshClaimed(feedId(channel))
+        val remaining = json(mockMvc.perform(get("/reader/v1/channels/$channel/deleted").auth()).andExpect(status().isOk))
+        assertEquals(listOf("$base/p3", "$base/p2"), remaining["items"].toList().map { it["url"].asString() })
+    }
+
+    @Test
+    fun `the deleted entries list needs the read scope and an existing channel`() {
+        mockMvc.perform(get("/reader/v1/channels/home/deleted")).andExpect(status().isUnauthorized)
+        mockMvc.perform(get("/reader/v1/channels/home/deleted").auth("noread")).andExpect(status().isForbidden)
+        mockMvc
+            .perform(get("/reader/v1/channels/nope/deleted").auth())
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.error").value("not_found"))
     }
 
     // --- the legacy Microsub extras are untouched --------------------------------------------------------------------

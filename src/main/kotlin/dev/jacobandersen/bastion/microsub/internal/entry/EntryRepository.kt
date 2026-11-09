@@ -24,6 +24,8 @@ data class EntryRow(
     val isRead: Boolean,
     val data: Map<String, Any?>,
     val source: EntrySource?,
+    /** When the owner deleted the entry; null for a live one. */
+    val removedAt: Instant? = null,
 ) {
     val cursor: Cursor get() = Cursor(createdAt, published, id)
 }
@@ -54,7 +56,8 @@ class EntryRepository(
      * refresh, so re-fetching a feed never resurrects removed entries or
      * marks read ones unread. An undated entry keeps the time it was first
      * seen ([dated] false) instead of moving to the top on every fetch.
-     * Every upsert records when the entry was last seen. Returns whether the entry is new.
+     * Every upsert records when the entry was last seen. A deleted entry (a marker) is never rewritten here: its
+     * content stays as it was, and [touchMarked] records that it was seen again. Returns whether the entry is new.
      */
     fun upsert(
         channelId: UUID,
@@ -84,6 +87,7 @@ class EntryRepository(
                     search = excluded.search,
                     updated_at = case when $DATA_CHANGED then excluded.updated_at else microsub_entries.updated_at end,
                     last_seen_at = excluded.last_seen_at
+                where microsub_entries.removed_at is null
                 returning (xmax = 0) as inserted
                 """.trimIndent(),
             ).param("id", UUID.randomUUID())
@@ -101,7 +105,46 @@ class EntryRepository(
             .param("read", read)
             .param("now", Timestamp.from(now))
             .query { rs, _ -> rs.getBoolean("inserted") }
-            .single()
+            .optional()
+            .orElse(false)
+
+    /**
+     * Records that a fetch listed these deleted entries again, and reattaches them to [feedId] when their feed was
+     * unfollowed and followed again. Nothing else about them changes.
+     */
+    fun touchMarked(
+        channelId: UUID,
+        feedId: UUID,
+        sourceKeys: Collection<String>,
+        now: Instant,
+    ): Int {
+        if (sourceKeys.isEmpty()) return 0
+        return jdbc
+            .sql(
+                """
+                update microsub_entries set last_seen_at = :now, feed_id = coalesce(feed_id, :feed)
+                where channel_id = :channel and removed_at is not null and source_key in (:keys)
+                """.trimIndent(),
+            ).param("now", Timestamp.from(now))
+            .param("feed", feedId)
+            .param("channel", channelId)
+            .param("keys", sourceKeys)
+            .update()
+    }
+
+    /**
+     * Deletes the feed's deleted entries that a fetch made at [fetchedAt] did not list: every entry the fetch listed
+     * had its `last_seen_at` set to exactly [fetchedAt] by [upsert] or [touchMarked].
+     */
+    fun deleteUnlistedMarkers(
+        feedId: UUID,
+        fetchedAt: Instant,
+    ): Int =
+        jdbc
+            .sql("delete from microsub_entries where feed_id = :feed and removed_at is not null and last_seen_at < :at")
+            .param("feed", feedId)
+            .param("at", Timestamp.from(fetchedAt))
+            .update()
 
     /** Where an entry sits in the timeline now; null once the entry no longer exists. */
     fun cursorOf(id: UUID): Cursor? =
@@ -160,7 +203,7 @@ class EntryRepository(
         return jdbc
             .sql(
                 """
-                select e.id, e.channel_id, e.created_at, e.published, e.is_read, e.data::text as data,
+                select e.id, e.channel_id, e.created_at, e.published, e.is_read, e.removed_at, e.data::text as data,
                        f.id as feed_id, f.url as feed_url, f.name as feed_name, f.photo as feed_photo
                 from microsub_entries e
                 left join microsub_feeds f on f.id = e.feed_id
@@ -205,7 +248,33 @@ class EntryRepository(
             .param("entry", entryId)
             .update()
 
-    fun remove(
+    /** Returns up to `limit + 1` deleted entries of the channel, most recently deleted first, after [after]. */
+    fun pageRemoved(
+        channelId: UUID,
+        after: RemovedCursor?,
+        limit: Int,
+    ): List<EntryRow> =
+        jdbc
+            .sql(
+                """
+                select e.id, e.channel_id, e.created_at, e.published, e.is_read, e.removed_at, e.data::text as data,
+                       f.id as feed_id, f.url as feed_url, f.name as feed_name, f.photo as feed_photo
+                from microsub_entries e
+                left join microsub_feeds f on f.id = e.feed_id
+                where e.channel_id = :channel and e.removed_at is not null
+                  and (cast(:afterAt as timestamptz) is null or (e.removed_at, e.id) < (cast(:afterAt as timestamptz), cast(:afterId as uuid)))
+                order by e.removed_at desc, e.id desc
+                limit :limit
+                """.trimIndent(),
+            ).param("channel", channelId)
+            .param("afterAt", after?.let { Timestamp.from(it.removedAt) })
+            .param("afterId", after?.id)
+            .param("limit", limit + 1)
+            .query(::map)
+            .list()
+
+    /** Marks entries deleted. Their content stays, see [EntryDeletionService]. Already deleted or unknown ids are skipped. */
+    fun markRemoved(
         channelId: UUID,
         ids: Collection<UUID>,
         now: Instant,
@@ -278,6 +347,7 @@ class EntryRepository(
             createdAt = rs.getTimestamp("created_at").toInstant(),
             published = rs.getTimestamp("published").toInstant(),
             isRead = rs.getBoolean("is_read"),
+            removedAt = rs.getTimestamp("removed_at")?.toInstant(),
             data = objectMapper.readValue(rs.getString("data"), Map::class.java) as Map<String, Any?>,
             source =
                 feedId?.let {

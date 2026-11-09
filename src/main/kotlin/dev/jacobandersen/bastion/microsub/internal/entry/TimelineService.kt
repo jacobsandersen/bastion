@@ -2,12 +2,10 @@ package dev.jacobandersen.bastion.microsub.internal.entry
 
 import dev.jacobandersen.bastion.microsub.internal.channel.ChannelService
 import dev.jacobandersen.bastion.microsub.internal.config.MicrosubConfig
-import dev.jacobandersen.bastion.microsub.internal.jf2.Jf2Item
 import dev.jacobandersen.bastion.microsub.internal.jf2.MicrosubUrls
 import dev.jacobandersen.bastion.microsub.internal.web.MicrosubError
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Instant
 import java.util.UUID
 
 /** Raw paging and filter parameters as the client sent them. */
@@ -29,6 +27,7 @@ data class PageRequest(
 class TimelineService(
     private val channels: ChannelService,
     private val entries: EntryRepository,
+    private val deletion: EntryDeletionService,
     private val config: MicrosubConfig,
 ) {
     @Transactional(readOnly = true)
@@ -108,7 +107,7 @@ class TimelineService(
         entryIds: List<String>,
     ) {
         val channel = channels.require(channelUid)
-        entries.remove(channel.id, ids(entryIds), Instant.now())
+        deletion.tombstone(channel.id, ids(entryIds))
     }
 
     private fun render(
@@ -122,27 +121,8 @@ class TimelineService(
                 items.firstOrNull()?.let { put("before", it.cursor.encode()) }
                 if (rows.size > query.limit) put("after", items.last().cursor.encode())
             }
-        return mapOf("items" to items.map(::serve), "paging" to paging)
+        return mapOf("items" to items.map { it.toJf2() }, "paging" to paging)
     }
-
-    private fun serve(row: EntryRow): Map<String, Any?> =
-        LinkedHashMap(row.data).apply {
-            put("_id", row.id.toString())
-            put("_is_read", row.isRead)
-            // Undated entries are ordered by when they were first seen; expose that so every entry carries `published`.
-            if (!containsKey("published")) put("published", Jf2Item.formatInstant(row.published))
-            row.source?.let { source ->
-                put(
-                    "_source",
-                    buildMap {
-                        put("_id", source.id.toString())
-                        put("url", source.url)
-                        source.name?.let { put("name", it) }
-                        source.photo?.let { put("photo", it) }
-                    },
-                )
-            }
-        }
 
     private fun cursor(value: String?): Cursor? {
         if (value.isNullOrBlank()) return null
