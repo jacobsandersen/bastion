@@ -48,14 +48,22 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - `micropub` has no public surface. Its `internal/command` and `internal/query` packages are protocol adapters over
   post commands/queries/metadata/syndication plus `media::media-storage`. Post updates are sent as `PostPatch`; the
   adapter does not merge the document itself.
-- `indieauth` exposes `indieauth::indieauth-token-query` and `indieauth::indieauth-scopes`. `AccessTokenQueryService`
-  resolves only tokens for the configured Bastion identity. Token exchange/refresh/revocation commands stay internal.
+- `indieauth` exposes `indieauth::indieauth-token-query`, `indieauth::indieauth-scopes` and
+  `indieauth::indieauth-metadata` (`IndieAuthMetadataContributor` adds vendor-namespaced members, e.g.
+  `bastion_reader_api`, to the server metadata). `AccessTokenQueryService` resolves only tokens for the configured
+  Bastion identity. Token exchange/refresh/revocation commands stay internal.
 - `webmention` exposes `webmention::webmention-read`, `webmention::webmention-events`
   (`ReceivedWebmentionChangedEvent`), and `webmention::webmention-policy`. Inbound and outbound commands stay internal. It uses
   `url::ContentUrlMatcher` for own-content checks, not `post::post-url`.
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
-- `microsub` has no public surface; see the Microsub section.
+- `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub) and `microsub::microsub-feeds` (feed
+  details and stale-feed refresh) only for the `reader` module; the rest is internal. See the Microsub section.
+- `reader` (`/reader/v1`) has no public surface. It owns the extras Bastion's own client needs beyond the Microsub spec:
+  the public capability document (`GET /reader/v1`), `POST /reader/v1/channels/{uid}/refresh`,
+  `GET /reader/v1/events` and `GET /reader/v1/channels/{uid}/feeds`. It checks the Microsub `read` scope (Bearer header
+  only) and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
+  feed fields still work and share its code; they are removed in a later step.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
   IndieAuth and Micropub. Everything else is internal. The Micropub multipart filter lives in Micropub, not `config`.

@@ -8,8 +8,6 @@ import dev.jacobandersen.bastion.microsub.internal.fetch.FeedLoad
 import dev.jacobandersen.bastion.microsub.internal.jf2.MicrosubUrls
 import dev.jacobandersen.bastion.microsub.internal.jf2.jf2
 import dev.jacobandersen.bastion.microsub.internal.web.MicrosubError
-import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionService
-import dev.jacobandersen.bastion.websub.subscription.WebsubSubscriptionState
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
 import java.time.Instant
@@ -27,7 +25,7 @@ class FollowService(
     private val discovery: FeedDiscovery,
     private val ingest: EntryIngestService,
     private val refresh: FeedRefreshService,
-    private val websub: WebsubSubscriptionService,
+    private val details: FeedDetailsMapper,
     private val config: MicrosubConfig,
 ) {
     fun list(channelUid: String?): List<Map<String, Any>> = feeds.listByChannel(channels.require(channelUid).id).map(::view)
@@ -75,22 +73,16 @@ class FollowService(
     private fun normalize(url: String?): String =
         url?.let(MicrosubUrls::fromUserInput) ?: throw MicrosubError.invalidRequest("The 'url' parameter must be a URL")
 
-    private fun view(feed: Feed): Map<String, Any> =
-        jf2 {
+    private fun view(feed: Feed): Map<String, Any> {
+        val view = details.of(feed)
+        return jf2 {
             this["type"] = "feed"
-            this["url"] = feed.url
-            this["name"] = feed.name
-            this["photo"] = feed.photo
-            this["description"] = feed.description
-            this["format"] = feed.format.name.lowercase()
-            this["websub"] = websubOf(feed)
+            this["url"] = view.url
+            this["name"] = view.name
+            this["photo"] = view.photo
+            this["description"] = view.description
+            this["format"] = view.format
+            this["websub"] = view.websub
         }
-
-    /** `active` once the hub verified the subscription, `pending` while one is still settling, absent otherwise. */
-    private fun websubOf(feed: Feed): String? =
-        when (feed.subscriptionId?.let(websub::find)?.state) {
-            WebsubSubscriptionState.ACTIVE -> "active"
-            WebsubSubscriptionState.PENDING, WebsubSubscriptionState.UNSUBSCRIBING -> "pending"
-            else -> null
-        }
+    }
 }

@@ -1,11 +1,11 @@
 package dev.jacobandersen.bastion.microsub.internal.web
 
+import dev.jacobandersen.bastion.microsub.events.EntryEvents
 import dev.jacobandersen.bastion.microsub.internal.channel.ChannelService
 import dev.jacobandersen.bastion.microsub.internal.entry.PageRequest
 import dev.jacobandersen.bastion.microsub.internal.entry.TimelineService
 import dev.jacobandersen.bastion.microsub.internal.feed.DiscoveryService
 import dev.jacobandersen.bastion.microsub.internal.feed.FollowService
-import dev.jacobandersen.bastion.microsub.internal.live.EntryEvents
 import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationKind
 import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationService
 import dev.jacobandersen.bastion.microsub.internal.security.MicrosubAuthentication

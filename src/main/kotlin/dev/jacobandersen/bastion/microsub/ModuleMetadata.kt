@@ -6,8 +6,9 @@ import org.springframework.modulith.PackageInfo
 /**
  * Microsub server (https://indieweb.org/Microsub-spec): follows feeds for the
  * configured Bastion identity and serves channels and timelines to reader
- * clients. No public surface. It contributes an `OutboundWebmentionPolicy` so
- * blocked users are not sent webmentions.
+ * clients. It stays spec-aligned: Bastion-specific extras for its own reader client live in the `reader` module,
+ * which reaches in only through `microsub::microsub-events` and `microsub::microsub-feeds`. It contributes an
+ * `OutboundWebmentionPolicy` so blocked users are not sent webmentions.
  */
 @PackageInfo
 @ApplicationModule(
