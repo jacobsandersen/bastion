@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.48](https://github.com/jacobsandersen/bastion/compare/v1.3.47...v1.3.48) (2026-11-09)
+
+
+### Features
+
+* **reader:** add reader module with capability discovery ([#130](https://github.com/jacobsandersen/bastion/issues/130)) ([9fdf2cc](https://github.com/jacobsandersen/bastion/commit/9fdf2cc632c98c3e37aa59c685bb45f0b64e9ea9))
+
 ## [1.3.47](https://github.com/jacobsandersen/bastion/compare/v1.3.46...v1.3.47) (2026-11-08)
 
 
