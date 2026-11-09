@@ -58,12 +58,15 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
 - `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub), `microsub::microsub-feeds` (feed
-  details and stale-feed refresh) and `microsub::microsub-entries` (entry-status check) only for the `reader` module; the rest is internal. See the Microsub section.
+  details and stale-feed refresh) and `microsub::microsub-entries` (entry-status check, deleted-entry reads) only for the `reader` module; the rest is internal. See the Microsub section.
 - `reader` (`/reader/v1`) has no public surface. It owns the extras Bastion's own client needs beyond the Microsub spec:
   the public capability document (`GET /reader/v1`), `POST /reader/v1/channels/{uid}/refresh`,
-  `GET /reader/v1/events`, `GET /reader/v1/channels/{uid}/feeds` and `POST /reader/v1/channels/{uid}/entries/check`
+  `GET /reader/v1/events`, `GET /reader/v1/channels/{uid}/feeds`, `GET /reader/v1/channels/{uid}/deleted`
+  (deleted entries, with a note that they are permanently deleted once their feed drops them) and
+  `POST /reader/v1/channels/{uid}/entries/check`
   (up to 500 cached entry ids; answers `gone`: removed/marked, hard-deleted, foreign or malformed ids; JSON or form
-  body; feature `entry-check`; backed by `microsub::microsub-entries`). It checks the Microsub `read` scope (Bearer header
+  body; feature `entry-check`; backed by `microsub::microsub-entries`). New endpoints are
+  advertised in `ReaderApi.FEATURES`. It checks the Microsub `read` scope (Bearer header
   only) and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
   feed fields still work and share its code; they are removed in a later step.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
@@ -287,8 +290,16 @@ When updating this file, preserve this bar for all agents and keep entries conci
   `microsub_moderation` (null `channel_id` = `global`). `V25` seeds `notifications` and `home`.
 - Entry `source_key` is unique per channel. Feed entries use `feed:<followed feed url>:<uid|url|hash>`, because item
   ids are only unique within one feed and the URL, unlike the feed row id, survives unfollow and re-follow; webmention
-  entries use `webmention:<id>`. Every upsert sets `last_seen_at`, which nothing reads yet. Bastion never purges entries
-  automatically; they go only through `remove`, blocks, webmention deletion or channel deletion.
+  entries use `webmention:<id>`. Bastion never purges entries automatically; they go only through `remove`, blocks, webmention
+  deletion or channel deletion.
+- `remove` (`EntryDeletionService.tombstone`) only sets `removed_at`: the row is a marker that keeps its content, so
+  an item its feed still lists is not stored again as a new unread entry. The upsert never rewrites a marker
+  (`ON CONFLICT ... WHERE removed_at is null`); `touchMarked` only sets its `last_seen_at` (and reattaches `feed_id`
+  after a re-follow). `EntryIngestService.ingestFetched`, used only for a `Loaded` fetch with at least one item,
+  then hard-deletes the feed's markers whose `last_seen_at` is older than that fetch. Failed, 304 and empty fetches
+  delete nothing, because they prove nothing about what the feed lists. Known limits: one fetch that omits an item
+  is enough (a stale CDN copy could drop a marker early), and markers of an unfollowed feed stay until it is followed
+  again. The 50-item fetch window counts as "listed".
 - Feeds are parsed mf2-first (`Mf2FeedParser`), then `rel=alternate` RSS/Atom (Rome; DOCTYPEs rejected) or JSON Feed.
   `FeedFetcher` follows redirects by hand and checks every hop with `FeedHostValidator` (SSRF); tests override that
   bean to reach a local server.

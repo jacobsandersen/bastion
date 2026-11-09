@@ -661,6 +661,170 @@ class MicrosubIntegrationTest {
         assertEquals(listOf("$base/p3", "$base/p2"), urls(timeline(channel)), "the removed entry stays removed")
     }
 
+    private fun entryId(
+        channel: String,
+        slug: String,
+    ): String = timeline(channel)["items"].toList().first { it["url"].asString() == "$base/$slug" }["_id"].asString()
+
+    private fun remove(
+        channel: String,
+        id: String,
+    ) = action("action" to "timeline", "method" to "remove", "channel" to channel, "entry" to id).andExpect(status().isOk)
+
+    private fun markers(channel: String): List<String> =
+        jdbc
+            .sql(
+                "select url from microsub_entries where removed_at is not null " +
+                    "and channel_id = (select id from microsub_channels where uid = :uid) order by url",
+            ).param("uid", channel)
+            .query(String::class.java)
+            .list()
+            .filterNotNull()
+
+    @Test
+    fun `deleting an entry keeps its content and a 200 re-fetch neither revives nor refills it`() {
+        pages["/mark"] =
+            "text/html" to hFeed(hEntry("p1", "Original", "https://alice.example/"), hEntry("p2", "Two", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/mark")
+        val p1 = entryId(channel, "p1")
+        remove(channel, p1)
+        assertEquals(listOf("$base/p1"), markers(channel))
+        assertEquals(
+            "Original",
+            jdbc
+                .sql(
+                    "select data -> 'content' ->> 'text' from microsub_entries where id = cast(:id as uuid)",
+                ).param("id", p1)
+                .query(String::class.java)
+                .single(),
+            "the marker keeps its content",
+        )
+
+        ageEntries(channel, Duration.ofDays(3))
+        pages["/mark"] =
+            "text/html" to
+            hFeed(
+                hEntry("p1", "Edited", "https://alice.example/"),
+                hEntry("p2", "Two", "https://alice.example/"),
+                hEntry("p3", "Three", "https://alice.example/"),
+            )
+        refresh.refreshClaimed(feedId(channel))
+
+        assertEquals(listOf("$base/p3", "$base/p2"), urls(timeline(channel)), "the deleted entry does not come back")
+        assertEquals(1, unread(channel), "and nothing about it is unread")
+        val row =
+            jdbc
+                .sql(
+                    "select data -> 'content' ->> 'text' as text, last_seen_at > now() - interval '1 day' as seen from microsub_entries where id = cast(:id as uuid)",
+                ).param("id", p1)
+                .query {
+                    rs,
+                    _,
+                    ->
+                    rs.getString("text") to
+                        rs.getBoolean("seen")
+                }.single()
+        assertEquals("Original", row.first, "the marker is not refilled with the feed's new version")
+        assertTrue(row.second, "but it records that the feed still lists it")
+    }
+
+    @Test
+    fun `a 304 poll neither deletes nor revives a marker`() {
+        etagged += "/quietmark"
+        pages["/quietmark"] =
+            "text/html" to hFeed(hEntry("p1", "One", "https://alice.example/"), hEntry("p2", "Two", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/quietmark")
+        remove(channel, entryId(channel, "p1"))
+
+        ageEntries(channel, Duration.ofDays(60))
+        refresh.refreshClaimed(feedId(channel)) // 304: nothing is parsed, so nothing may be concluded about what the feed lists
+        assertEquals(listOf("$base/p1"), markers(channel))
+        assertEquals(listOf("$base/p2"), urls(timeline(channel)))
+    }
+
+    @Test
+    fun `a marker is permanently deleted once a loaded fetch no longer lists it`() {
+        pages["/gone"] =
+            "text/html" to
+            hFeed(
+                hEntry("p1", "One", "https://alice.example/"),
+                hEntry("p2", "Two", "https://alice.example/"),
+                hEntry("p3", "Three", "https://alice.example/"),
+            )
+        val channel = newChannel()
+        follow(channel, "/gone")
+        remove(channel, entryId(channel, "p1"))
+        remove(channel, entryId(channel, "p2"))
+
+        pages["/gone"] =
+            "text/html" to hFeed(hEntry("p2", "Two", "https://alice.example/"), hEntry("p3", "Three", "https://alice.example/"))
+        refresh.refreshClaimed(feedId(channel))
+
+        assertEquals(listOf("$base/p2"), markers(channel), "p1 left its feed and is gone for good; p2 is still listed")
+        assertEquals(listOf("$base/p3"), urls(timeline(channel)), "live entries are never touched by this")
+        assertEquals(2, entryRows(channel), "read entries that left a feed are kept too: only markers are deleted")
+    }
+
+    @Test
+    fun `a failed fetch or an empty document never deletes a marker`() {
+        pages["/flaky"] = "text/html" to hFeed(hEntry("p1", "One", "https://alice.example/"), hEntry("p2", "Two", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/flaky")
+        remove(channel, entryId(channel, "p1"))
+
+        pages.remove("/flaky") // the server answers 404
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(listOf("$base/p1"), markers(channel), "a failed fetch says nothing about what the feed lists")
+
+        pages["/flaky"] = "text/html" to hFeed() // a document that lists nothing
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(listOf("$base/p1"), markers(channel), "an empty document is not evidence either")
+
+        pages["/flaky"] = "text/html" to hFeed(hEntry("p1", "One", "https://alice.example/"))
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(listOf("$base/p1"), markers(channel), "a feed that lists it again keeps it")
+        assertEquals(emptyList<String>(), urls(timeline(channel)).filter { it == "$base/p1" }, "and it stays deleted")
+    }
+
+    @Test
+    fun `a deleted entry stays deleted when its feed is unfollowed and followed again`() {
+        pages["/refollowmark"] =
+            "text/html" to hFeed(hEntry("p1", "One", "https://alice.example/"), hEntry("p2", "Two", "https://alice.example/"))
+        val channel = newChannel()
+        follow(channel, "/refollowmark")
+        remove(channel, entryId(channel, "p1"))
+        action("action" to "unfollow", "channel" to channel, "url" to "$base/refollowmark").andExpect(status().isOk)
+        follow(channel, "/refollowmark")
+
+        assertEquals(listOf("$base/p2"), urls(timeline(channel)))
+        assertEquals(
+            1,
+            jdbc
+                .sql(
+                    "select count(*) from microsub_entries where removed_at is not null and feed_id is not null and channel_id = (select id from microsub_channels where uid = :uid)",
+                ).param("uid", channel)
+                .query(Int::class.java)
+                .single(),
+            "the marker is attached to the new feed again",
+        )
+    }
+
+    @Test
+    fun `the hot path indexes leave deleted entries out`() {
+        val definitions =
+            jdbc
+                .sql(
+                    "select indexname, indexdef from pg_indexes where tablename = 'microsub_entries' and indexname in ('idx_microsub_entry_unread', 'idx_microsub_entry_arrival')",
+                ).query { rs, _ -> rs.getString("indexname") to rs.getString("indexdef") }
+                .list()
+                .toMap()
+        assertEquals(2, definitions.size)
+        assertTrue(definitions.getValue("idx_microsub_entry_unread").contains("WHERE ((NOT is_read) AND (removed_at IS NULL))"))
+        assertTrue(definitions.getValue("idx_microsub_entry_arrival").contains("WHERE (removed_at IS NULL)"))
+    }
+
     @Test
     fun `does not register the removed retention job and deletes a leftover one`() {
         val leftover = MicrosubSchedulers.REMOVED_RETENTION_JOB_ID

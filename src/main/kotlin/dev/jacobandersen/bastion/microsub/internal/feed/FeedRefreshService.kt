@@ -90,7 +90,7 @@ class FeedRefreshService(
             }
 
             is FeedLoad.Loaded -> {
-                val added = ingest.ingest(feed.channelId, feed.id, feed.url, load.feed.items, read = false)
+                val added = ingest.ingestFetched(feed.channelId, feed.id, feed.url, load.feed.items, read = false)
                 if (added > 0) channels.uidOf(feed.channelId)?.let { events.publish(it, added) }
                 val subscriptionId = syncSubscription(feed, load.feed)
                 feeds.recordSuccess(feed.id, metadataOf(load), now.plus(successInterval(subscriptionId)), now)
