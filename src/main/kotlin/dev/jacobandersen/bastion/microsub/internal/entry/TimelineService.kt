@@ -148,7 +148,7 @@ class TimelineService(
         if (value.isNullOrBlank()) return null
         Cursor.decode(value)?.let { return it }
         // A cursor from before timelines were ordered by arrival: resolve the entry's position now, or start over
-        // from the newest page if it has been purged (clients de-duplicate by entry id).
+        // from the newest page if it no longer exists (clients de-duplicate by entry id).
         Cursor.legacyEntryId(value)?.let { return entries.cursorOf(it) }
         throw MicrosubError.invalidRequest("Invalid paging cursor")
     }
