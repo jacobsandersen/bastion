@@ -80,7 +80,8 @@ object HtmlSanitizer {
         private fun breakBefore(block: Element) {
             if (out.isEmpty()) return
             val wanted = if (block.nameIs("p")) 2 else 1
-            val trailing = out.reversed().takeWhile { it == '\n' }.length
+            var trailing = 0
+            while (trailing < wanted && trailing < out.length && out[out.length - 1 - trailing] == '\n') trailing++
             repeat((wanted - trailing).coerceAtLeast(0)) { out.append('\n') }
         }
     }
