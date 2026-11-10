@@ -1,6 +1,7 @@
 package dev.jacobandersen.bastion.microsub.internal.entry
 
 import dev.jacobandersen.bastion.microsub.internal.jf2.Jf2Item
+import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationSql.NOT_MODERATED
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import tools.jackson.databind.ObjectMapper
@@ -360,11 +361,5 @@ class EntryRepository(
         private const val TEXT_ARRAY_CATEGORIES = "array(select jsonb_array_elements_text(cast(:categories as jsonb)))"
         private const val TEXT_ARRAY_KINDS = "array(select jsonb_array_elements_text(cast(:kinds as jsonb)))"
         private const val DATA_CHANGED = "microsub_entries.data is distinct from excluded.data"
-
-        private const val NOT_MODERATED =
-            """not exists (
-                select 1 from microsub_moderation m
-                where m.url = e.author_url and (m.channel_id = e.channel_id or m.channel_id is null)
-            )"""
     }
 }

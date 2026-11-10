@@ -9,6 +9,8 @@ import dev.jacobandersen.bastion.microsub.events.EntryEvents
 import dev.jacobandersen.bastion.microsub.feeds.FeedDetails
 import dev.jacobandersen.bastion.microsub.feeds.FeedRefreshCommandService
 import dev.jacobandersen.bastion.microsub.feeds.FeedStateQueryService
+import dev.jacobandersen.bastion.microsub.stats.StorageQueryService
+import dev.jacobandersen.bastion.microsub.stats.UnreadQueryService
 import dev.jacobandersen.bastion.reader.internal.ReaderApi
 import dev.jacobandersen.bastion.reader.internal.security.ReaderAuthentication
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -49,6 +51,8 @@ class ReaderController(
     private val entryStatus: EntryStatusQueryService,
     private val deleted: DeletedEntryQueryService,
     private val bulkDelete: EntryBulkDeleteService,
+    private val unreadTotals: UnreadQueryService,
+    private val storageStats: StorageQueryService,
 ) {
     private val capabilities =
         ReaderCapabilities(
@@ -211,6 +215,26 @@ class ReaderController(
             throw ReaderError.invalidRequest("Name a channel or feed, or give 'published_before' or 'unfollowed'")
         }
         return BulkDeleteScope(channel, feed, includeUnread, before, unfollowed)
+    }
+
+    /**
+     * Unread entries on the server: the `total` (without the `notifications` channel), each channel and each followed
+     * feed. Entries marked deleted are not unread. Always current.
+     */
+    @GetMapping("/unread")
+    fun unread(): ResponseEntity<Map<String, Any>> {
+        requireScope()
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(unreadTotals.totals().toBody())
+    }
+
+    /**
+     * What Microsub stores: counts and bytes per channel and feed, overall, plus the database size and any configured
+     * warning that is exceeded. Computed at most once per cache period on each replica (`computed_at`, `ttl_seconds`).
+     */
+    @GetMapping("/storage")
+    fun storage(): ResponseEntity<Map<String, Any?>> {
+        requireScope()
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(storageStats.report().toBody())
     }
 
     private fun view(feed: FeedDetails): Map<String, String> =

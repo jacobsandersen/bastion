@@ -1,5 +1,6 @@
 package dev.jacobandersen.bastion.microsub.internal.channel
 
+import dev.jacobandersen.bastion.microsub.internal.moderation.ModerationSql.NOT_MODERATED
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 import java.sql.ResultSet
@@ -99,10 +100,7 @@ class ChannelRepository(
                 select e.channel_id, count(*) as unread
                 from microsub_entries e
                 where not e.is_read and e.removed_at is null
-                  and not exists (
-                    select 1 from microsub_moderation m
-                    where m.url = e.author_url and (m.channel_id = e.channel_id or m.channel_id is null)
-                  )
+                  and $NOT_MODERATED
                 group by e.channel_id
                 """.trimIndent(),
             ).query { rs, _ -> rs.getObject("channel_id", UUID::class.java) to rs.getInt("unread") }

@@ -24,8 +24,19 @@ object ReaderApi {
     const val FEATURE_ENTRY_CHECK = "entry-check"
     const val FEATURE_DELETED_ENTRIES = "deleted-entries"
     const val FEATURE_BULK_DELETE = "bulk-delete"
+    const val FEATURE_UNREAD_TOTALS = "unread-totals"
+    const val FEATURE_STORAGE = "storage"
 
     /** New features are additive; [VERSION] changes only for breaking changes. */
     val FEATURES =
-        listOf(FEATURE_REFRESH, FEATURE_EVENTS, FEATURE_FEED_DETAILS, FEATURE_ENTRY_CHECK, FEATURE_DELETED_ENTRIES, FEATURE_BULK_DELETE)
+        listOf(
+            FEATURE_REFRESH,
+            FEATURE_EVENTS,
+            FEATURE_FEED_DETAILS,
+            FEATURE_ENTRY_CHECK,
+            FEATURE_DELETED_ENTRIES,
+            FEATURE_BULK_DELETE,
+            FEATURE_UNREAD_TOTALS,
+            FEATURE_STORAGE,
+        )
 }
