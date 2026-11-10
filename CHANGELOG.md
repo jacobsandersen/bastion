@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.51](https://github.com/jacobsandersen/bastion/compare/v1.3.50...v1.3.51) (2026-11-10)
+
+
+### Features
+
+* **reader:** add bulk delete of microsub entries with a dry run ([#139](https://github.com/jacobsandersen/bastion/issues/139)) ([31ca94f](https://github.com/jacobsandersen/bastion/commit/31ca94f462717a1ba152795ffd859d87cc3445bb))
+* **reader:** add unread totals and storage reporting ([#140](https://github.com/jacobsandersen/bastion/issues/140)) ([79856e7](https://github.com/jacobsandersen/bastion/commit/79856e70a4e7966c2d084dbc7bc655c61f7c4204))
+
 ## [1.3.50](https://github.com/jacobsandersen/bastion/compare/v1.3.49...v1.3.50) (2026-11-09)
 
 
