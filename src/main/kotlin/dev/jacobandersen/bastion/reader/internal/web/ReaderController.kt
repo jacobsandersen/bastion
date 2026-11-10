@@ -1,6 +1,9 @@
 package dev.jacobandersen.bastion.reader.internal.web
 
+import dev.jacobandersen.bastion.microsub.entries.BulkDeleteRefusal
+import dev.jacobandersen.bastion.microsub.entries.BulkDeleteScope
 import dev.jacobandersen.bastion.microsub.entries.DeletedEntryQueryService
+import dev.jacobandersen.bastion.microsub.entries.EntryBulkDeleteService
 import dev.jacobandersen.bastion.microsub.entries.EntryStatusQueryService
 import dev.jacobandersen.bastion.microsub.events.EntryEvents
 import dev.jacobandersen.bastion.microsub.feeds.FeedDetails
@@ -26,12 +29,15 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Duration
+import java.time.Instant
+import java.time.format.DateTimeParseException
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * Bastion's reader API: the capability document, on-demand refresh, the live entries stream, feed details and the entry check and deleted entries.
- * Everything except the capability document needs a Bearer token with the Microsub `read` scope.
+ * Bastion's reader API: the capability document, on-demand refresh, the live entries stream, feed details, the entry check, deleted
+ * entries and bulk delete. Everything except the capability document needs a Bearer token with the Microsub `read` scope;
+ * bulk delete also needs `channels`.
  */
 @RestController
 @RequestMapping(ReaderApi.PATH)
@@ -42,6 +48,7 @@ class ReaderController(
     private val events: EntryEvents,
     private val entryStatus: EntryStatusQueryService,
     private val deleted: DeletedEntryQueryService,
+    private val bulkDelete: EntryBulkDeleteService,
 ) {
     private val capabilities =
         ReaderCapabilities(
@@ -132,6 +139,80 @@ class ReaderController(
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body)
     }
 
+    /**
+     * Deletes many entries at once. A dry run (the default) answers what the scope matches: count, unread count,
+     * stored bytes and the published range. Executing (`dry_run: false`) must quote that count as `expected` and
+     * deletes at most one chunk of 5,000 entries, answering how many are `remaining`; the client repeats the call until
+     * none are. It is refused with 409 `scope_changed`, deleting nothing, when more entries match now than expected,
+     * so it can never delete more than the owner was shown. Unread entries need `state: "all"` and `confirm_unread`.
+     * Needs the `read` and `channels` scopes.
+     */
+    @PostMapping("/entries/delete", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun deleteEntries(
+        @RequestBody body: BulkDeleteRequest,
+    ): ResponseEntity<Map<String, Any?>> {
+        val auth = requireScope()
+        requireScope(ReaderApi.BULK_DELETE_SCOPE)
+        val scope = bulkDeleteScope(body.scope)
+        val result =
+            try {
+                if (body.dryRun ?: true) {
+                    val preview = bulkDelete.preview(scope)
+                    mapOf(
+                        "matched" to preview.matched,
+                        "unread" to preview.unread,
+                        "permanent" to preview.permanent,
+                        "bytes" to preview.bytes,
+                        "oldest" to preview.oldest?.toString(),
+                        "newest" to preview.newest?.toString(),
+                        "by_channel" to preview.byChannel.map { mapOf("uid" to it.uid, "matched" to it.matched) },
+                    )
+                } else {
+                    val expected = body.expected ?: throw ReaderError.invalidRequest("'expected' must quote the dry run's matched count")
+                    if (expected < 0) throw ReaderError.invalidRequest("'expected' must not be negative")
+                    if (scope.includeUnread && body.confirmUnread != true) {
+                        throw ReaderError.invalidRequest("Deleting unread entries needs 'confirm_unread': true")
+                    }
+                    val chunk = bulkDelete.deleteChunk(scope, expected, auth.clientId)
+                    mapOf("deleted" to chunk.deleted, "remaining" to chunk.remaining)
+                }
+            } catch (refusal: BulkDeleteRefusal) {
+                throw when (refusal) {
+                    is BulkDeleteRefusal.ChannelNotFound -> ReaderError.channelNotFound(refusal.uid)
+                    is BulkDeleteRefusal.ScopeChanged -> ReaderError.scopeChanged(refusal.matched, refusal.expected)
+                    is BulkDeleteRefusal.Busy -> ReaderError.busy()
+                }
+            }
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(result)
+    }
+
+    /** Validates the request's scope: some narrowing filter is required, so no call can mean everything everywhere. */
+    private fun bulkDeleteScope(request: BulkDeleteScopeRequest?): BulkDeleteScope {
+        if (request == null) throw ReaderError.invalidRequest("'scope' is required")
+        val includeUnread =
+            when (request.state) {
+                null, "read" -> false
+                "all" -> true
+                else -> throw ReaderError.invalidRequest("'state' must be 'read' or 'all'")
+            }
+        val before =
+            request.publishedBefore?.let {
+                try {
+                    Instant.parse(it)
+                } catch (_: DateTimeParseException) {
+                    throw ReaderError.invalidRequest("'published_before' must be an ISO-8601 instant such as 2026-08-01T00:00:00Z")
+                }
+            }
+        val channel = request.channel?.trim()?.takeIf { it.isNotEmpty() }
+        val feed = request.feed?.trim()?.takeIf { it.isNotEmpty() }
+        val unfollowed = request.unfollowed == true
+        val everywhere = channel == null || channel == EntryBulkDeleteService.GLOBAL
+        if (everywhere && feed == null && before == null && !unfollowed) {
+            throw ReaderError.invalidRequest("Name a channel or feed, or give 'published_before' or 'unfollowed'")
+        }
+        return BulkDeleteScope(channel, feed, includeUnread, before, unfollowed)
+    }
+
     private fun view(feed: FeedDetails): Map<String, String> =
         buildMap {
             put("url", feed.url)
@@ -142,19 +223,20 @@ class ReaderController(
             feed.websub?.let { put("websub", it) }
         }
 
-    private fun requireScope() {
+    private fun requireScope(scope: String = ReaderApi.REQUIRED_SCOPE): ReaderAuthentication {
         val auth = SecurityContextHolder.getContext().authentication as? ReaderAuthentication ?: throw ReaderError.unauthorized()
-        if (ReaderApi.REQUIRED_SCOPE !in auth.scopes) throw ReaderError.insufficientScope(ReaderApi.REQUIRED_SCOPE)
+        if (scope !in auth.scopes) throw ReaderError.insufficientScope(scope)
+        return auth
     }
 
     // An explicit JSON content type keeps these answers valid for the event stream route, whose Accept is text/event-stream.
     @ExceptionHandler(ReaderError::class)
-    fun handle(error: ReaderError): ResponseEntity<Map<String, String>> =
+    fun handle(error: ReaderError): ResponseEntity<Map<String, Any>> =
         ResponseEntity.status(error.status).contentType(MediaType.APPLICATION_JSON).body(error.body())
 
     /** Anything else keeps the `error`/`error_description` shape: framework 4xx errors map to `invalid_request`. */
     @ExceptionHandler(Exception::class)
-    fun handleUnexpected(error: Exception): ResponseEntity<Map<String, String>> {
+    fun handleUnexpected(error: Exception): ResponseEntity<Map<String, Any>> {
         if (error is ErrorResponse && error.statusCode.is4xxClientError) {
             val body = ReaderError(HttpStatus.valueOf(error.statusCode.value()), "invalid_request", error.body.detail ?: "Invalid request")
             return ResponseEntity
