@@ -58,7 +58,7 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
 - `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub), `microsub::microsub-feeds` (feed
-  details and stale-feed refresh), `microsub::microsub-entries` (entry-status check, deleted-entry reads, bulk delete) and
+  details and stale-feed refresh), `microsub::microsub-entries` (entry-status check, deleted-entry reads, entry snapshot, bulk delete) and
   `microsub::microsub-stats` (unread totals, storage report) only for the `reader` module; the rest is internal. See the Microsub section.
 - `reader` (`/reader/v1`) has no public surface. It owns the extras Bastion's own client needs beyond the Microsub spec:
   the public capability document (`GET /reader/v1`), `POST /reader/v1/channels/{uid}/refresh`,
@@ -77,6 +77,16 @@ When updating this file, preserve this bar for all agents and keep entries conci
   advertised in `ReaderApi.FEATURES`. It checks the Microsub `read` scope (Bearer header only), plus `channels` for
   bulk delete, and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
   feed fields still work and share its code; they are removed in a later step.
+  - Saved folders (feature `saved`, `reader/internal/saved`, `/reader/v1/saved/...`, tables `reader_saved_folders` and
+    `reader_saved_items`) are the owner's private frozen copies of entries, kept apart from channels and feeds. They
+    have no foreign key to `microsub_*`, so no entry lifecycle event (remove marker, feed drop, bulk delete, block,
+    webmention retraction, unfollow, channel delete) reaches them; only an explicit item or folder delete does, and
+    nothing purges them. They cannot be re-fetched: back up the database. One folder per item; a folder holds a post
+    (canonical url, else the origin entry id) once. The copy is taken server-side through
+    `EntrySnapshotQueryService` (also for deleted markers, so a deleted entry can be rescued) and is never refreshed.
+    Reads, save, move and remove need `read`; folder create/rename/delete also `channels`. Every item change bumps
+    the folder `version`, which clients sync by. `GET /storage` has a separate `saved` member (always current);
+    `microsub.on_disk_bytes` and the warnings never count saved data. Saved items ignore mute/block.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
   IndieAuth and Micropub. Everything else is internal. The Micropub multipart filter lives in Micropub, not `config`.
