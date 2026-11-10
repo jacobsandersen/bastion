@@ -50,6 +50,8 @@ import javax.sql.DataSource
     properties = [
         "jobrunr.dashboard.enabled=false",
         "jobrunr.background-job-server.enabled=false",
+        "bastion.microsub.storage-cache-ttl=0s",
+        "bastion.microsub.storage-warn-bytes=1",
     ],
 )
 class ReaderIntegrationTest {
@@ -193,9 +195,21 @@ class ReaderIntegrationTest {
             .andExpect(jsonPath("$.api").value("bastion-reader"))
             .andExpect(jsonPath("$.version").value(1))
             .andExpect(jsonPath("$.microsub_endpoint").value("https://bastion.test/microsub"))
-            .andExpect(jsonPath("$.features", hasSize<Any>(6)))
+            .andExpect(jsonPath("$.features", hasSize<Any>(8)))
             .andExpect(
-                jsonPath("$.features", hasItems("refresh", "events", "feed-details", "entry-check", "deleted-entries", "bulk-delete")),
+                jsonPath(
+                    "$.features",
+                    hasItems(
+                        "refresh",
+                        "events",
+                        "feed-details",
+                        "entry-check",
+                        "deleted-entries",
+                        "bulk-delete",
+                        "unread-totals",
+                        "storage",
+                    ),
+                ),
             ).andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=300, public"))
         // A browser client on another origin reads it too, and so can a token holder.
         mockMvc
@@ -220,6 +234,8 @@ class ReaderIntegrationTest {
                     ).contentType(MediaType.APPLICATION_JSON).content("""{"entry":["x"]}""")
                 },
                 { get("/reader/v1/events").accept(MediaType.TEXT_EVENT_STREAM) },
+                { get("/reader/v1/unread") },
+                { get("/reader/v1/storage") },
             )
         routes.forEach { route ->
             mockMvc
@@ -410,6 +426,135 @@ class ReaderIntegrationTest {
             .andExpect(jsonPath("$.error").value("invalid_request"))
 
         check("nope", id).andExpect(status().isNotFound).andExpect(jsonPath("$.error").value("not_found"))
+    }
+
+    // --- unread and storage --------------------------------------------------------------------------------------------
+
+    private fun remove(
+        channel: String,
+        id: String,
+    ) = mockMvc
+        .perform(
+            post(
+                "/microsub",
+            ).auth("full").param("action", "timeline").param("method", "remove").param("channel", channel).param("entry", id),
+        ).andExpect(status().isOk)
+
+    private fun unreadBody(): JsonNode =
+        json(
+            mockMvc
+                .perform(get("/reader/v1/unread").auth())
+                .andExpect(status().isOk)
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store")),
+        )
+
+    private fun JsonNode.channelUnread(uid: String) = this["channels"].first { it["uid"].asString() == uid }["unread"].asInt()
+
+    @Test
+    fun `unread totals count per channel and feed, skip notifications in the total and ignore deleted and moderated entries`() {
+        pages["/u1"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        pages["/u2"] = "text/html" to hFeed(hEntry("p4", "Four"))
+        val channel = newChannel()
+        val other = newChannel()
+        follow(channel, "/u1")
+        follow(other, "/u2")
+        // Following backfills entries as read; make them unread like fresh arrivals.
+        jdbc
+            .sql("update microsub_entries set is_read = false where channel_id in (select id from microsub_channels where uid in (:uids))")
+            .param("uids", listOf(channel, other))
+            .update()
+        val baseline = unreadBody()
+        val others = baseline["total"].asInt() - 4
+
+        assertEquals(3, baseline.channelUnread(channel))
+        assertEquals(1, baseline.channelUnread(other))
+        assertEquals(3, baseline["feeds"].first { it["url"].asString() == "$base/u1" }["unread"].asInt())
+        assertEquals(channel, baseline["feeds"].first { it["url"].asString() == "$base/u1" }["channel"].asString())
+
+        // The server-wide total leaves notifications out; the channel list still carries it.
+        val notifications = jdbc.sql("select id from microsub_channels where uid = 'notifications'").query(UUID::class.java).single()
+        jdbc
+            .sql(
+                "insert into microsub_entries (id, channel_id, source_key, published, data, created_at, updated_at, last_seen_at) " +
+                    "values (:id, :channel, :key, now(), '{}'::jsonb, now(), now(), now())",
+            ).param("id", UUID.randomUUID())
+            .param("channel", notifications)
+            .param("key", "webmention:${UUID.randomUUID()}")
+            .update()
+        val withNotification = unreadBody()
+        assertEquals(1, withNotification.channelUnread("notifications"))
+        assertEquals(baseline["total"].asInt(), withNotification["total"].asInt())
+        assertEquals("notifications", withNotification["channels"][0]["uid"].asString(), "channels keep Microsub's order")
+
+        // Deleted entries are not unread; muted authors are hidden exactly as `action=channels` hides them.
+        remove(channel, entryIds(channel).first())
+        assertEquals(2, unreadBody().channelUnread(channel))
+        assertEquals(2, unread(channel), "the Microsub channel list agrees")
+        assertEquals(others + 3, unreadBody()["total"].asInt())
+        mockMvc
+            .perform(
+                post("/microsub")
+                    .auth("full")
+                    .param("action", "mute")
+                    .param("channel", other)
+                    .param("url", "https://alice.example/"),
+            ).andExpect(status().isOk)
+        val muted = unreadBody()
+        assertEquals(0, muted.channelUnread(other))
+        assertEquals(
+            0,
+            muted["feeds"]
+                .first {
+                    it["url"].asString() == "$base/u2"
+                }["unread"]
+                .asInt(),
+            "a followed feed with nothing unread is listed",
+        )
+        assertEquals(unread(other), muted.channelUnread(other))
+    }
+
+    @Test
+    fun `storage reports counts and bytes per channel and feed, separates deleted markers and warns past a threshold`() {
+        pages["/s1"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/s1")
+        jdbc
+            .sql("update microsub_entries set is_read = false where channel_id = (select id from microsub_channels where uid = :uid)")
+            .param("uid", channel)
+            .update()
+        remove(channel, entryIds(channel).first())
+
+        val body =
+            json(
+                mockMvc
+                    .perform(get("/reader/v1/storage").auth())
+                    .andExpect(status().isOk)
+                    .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                    .andExpect(jsonPath("$.ttl_seconds").value(0))
+                    .andExpect(jsonPath("$.computed_at").isString),
+            )
+        val microsub = body["microsub"]
+        val mine = microsub["channels"].first { it["uid"].asString() == channel }
+        assertEquals(2, mine["entries"].asInt(), "deleted entries are not counted as entries")
+        assertEquals(2, mine["unread"].asInt(), "and are not unread")
+        assertEquals(1, mine["removed"].asInt(), "they are reported separately")
+        assertTrue(mine["bytes"].asLong() > 0)
+        val feed = microsub["feeds"].first { it["url"].asString() == "$base/s1" }
+        assertEquals(channel, feed["channel"].asString())
+        assertEquals(2, feed["entries"].asInt())
+        assertEquals(1, feed["removed"].asInt())
+        assertEquals(mine["bytes"].asLong(), feed["bytes"].asLong())
+        assertTrue(microsub["entries"].asLong() >= 2)
+        assertTrue(microsub["removed"].asLong() >= 1)
+        assertTrue(microsub["payload_bytes"].asLong() >= mine["bytes"].asLong())
+        assertTrue(microsub["on_disk_bytes"].asLong() > 0)
+        assertTrue(body["database_bytes"].asLong() >= microsub["on_disk_bytes"].asLong())
+
+        // The test context sets a 1 byte limit and no entry limit.
+        assertEquals(1, body["warnings"].size())
+        assertEquals("bytes_high", body["warnings"][0]["code"].asString())
+        assertEquals(1, body["warnings"][0]["threshold"].asLong())
+        assertEquals(microsub["on_disk_bytes"].asLong(), body["warnings"][0]["value"].asLong())
     }
 
     // --- live stream -----------------------------------------------------------------------------------------------

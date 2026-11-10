@@ -18,6 +18,9 @@ import java.time.Duration
  * @property backfillAsRead Whether the entries ingested when following a feed start out read.
  * @property defaultLimit Timeline page size when the client gives none.
  * @property maxLimit Largest timeline page served.
+ * @property storageCacheTtl How long a replica reuses the storage report before recomputing it.
+ * @property storageWarnBytes Microsub tables larger than this many bytes on disk raise a storage warning. Unset: no warning.
+ * @property storageWarnEntries More entries than this raise a storage warning. Unset: no warning.
  */
 @ConfigurationProperties(prefix = "bastion.microsub")
 data class MicrosubConfig(
@@ -35,4 +38,7 @@ data class MicrosubConfig(
     val backfillAsRead: Boolean = true,
     val defaultLimit: Int = 20,
     val maxLimit: Int = 100,
+    val storageCacheTtl: Duration = Duration.ofMinutes(5),
+    val storageWarnBytes: Long? = null,
+    val storageWarnEntries: Long? = null,
 )

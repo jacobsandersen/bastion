@@ -83,6 +83,9 @@ bastion:
     backfill-as-read: ${BASTION_MICROSUB_BACKFILL_AS_READ:true}
     default-limit: ${BASTION_MICROSUB_DEFAULT_LIMIT:20}
     max-limit: ${BASTION_MICROSUB_MAX_LIMIT:100}
+    storage-cache-ttl: ${BASTION_MICROSUB_STORAGE_CACHE_TTL:5m}
+    storage-warn-bytes: ${BASTION_MICROSUB_STORAGE_WARN_BYTES:}
+    storage-warn-entries: ${BASTION_MICROSUB_STORAGE_WARN_ENTRIES:}
   cors:
     allowed-origins: ${BASTION_CORS_ALLOWED_ORIGINS:}
     allowed-methods: ${BASTION_CORS_ALLOWED_METHODS:GET,POST,PUT,PATCH,DELETE,OPTIONS}

@@ -6,7 +6,7 @@ import org.springframework.modulith.PackageInfo
 /**
  * Bastion's reader API (`/reader/v1`): the extras Bastion's own feed reader client (Grimoire) uses on top of plain
  * Microsub - on-demand feed refresh, the live entries stream, feed details (format, WebSub state), the entry check that tells
- * a client which cached entries are gone, the entries the owner deleted and bulk delete. These live here
+ * a client which cached entries are gone, the entries the owner deleted, bulk delete, and unread and storage totals. These live here
  * so the `microsub` module stays spec-aligned and works with any Microsub client.
  *
  * A client learns the API exists from the `bastion_reader_api` member of the IndieAuth server metadata and then reads
@@ -17,7 +17,7 @@ import org.springframework.modulith.PackageInfo
 @ApplicationModule(
     type = ApplicationModule.Type.CLOSED,
     allowedDependencies = [
-        "microsub::microsub-entries", "microsub::microsub-events", "microsub::microsub-feeds",
+        "microsub::microsub-entries", "microsub::microsub-events", "microsub::microsub-feeds", "microsub::microsub-stats",
         "indieauth::indieauth-token-query", "indieauth::indieauth-metadata",
         "config::config-security",
     ],

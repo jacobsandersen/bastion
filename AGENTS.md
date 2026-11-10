@@ -58,7 +58,8 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
 - `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub), `microsub::microsub-feeds` (feed
-  details and stale-feed refresh) and `microsub::microsub-entries` (entry-status check, deleted-entry reads, bulk delete) only for the `reader` module; the rest is internal. See the Microsub section.
+  details and stale-feed refresh), `microsub::microsub-entries` (entry-status check, deleted-entry reads, bulk delete) and
+  `microsub::microsub-stats` (unread totals, storage report) only for the `reader` module; the rest is internal. See the Microsub section.
 - `reader` (`/reader/v1`) has no public surface. It owns the extras Bastion's own client needs beyond the Microsub spec:
   the public capability document (`GET /reader/v1`), `POST /reader/v1/channels/{uid}/refresh`,
   `GET /reader/v1/events`, `GET /reader/v1/channels/{uid}/feeds`, `GET /reader/v1/channels/{uid}/deleted`
@@ -66,8 +67,15 @@ When updating this file, preserve this bar for all agents and keep entries conci
   `POST /reader/v1/channels/{uid}/entries/check`
   (up to 500 cached entry ids; answers `gone`: removed/marked, hard-deleted, foreign or malformed ids; JSON or form
   body; feature `entry-check`; backed by `microsub::microsub-entries`) and `POST /reader/v1/entries/delete` (feature
-  `bulk-delete`, see Microsub). New endpoints are advertised in `ReaderApi.FEATURES`. It checks the Microsub `read`
-  scope (Bearer header only), plus `channels` for bulk delete, and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
+  `bulk-delete`, see Microsub).
+  `GET /reader/v1/unread` (feature `unread-totals`, uncached: `total` without the `notifications` channel, every
+  channel, every followed feed; deleted entries and muted/blocked authors are not unread, via the shared
+  `ModerationSql.NOT_MODERATED`) and `GET /reader/v1/storage` (feature `storage`: entries, unread, deleted markers and
+  row bytes per channel and feed, `on_disk_bytes`, `database_bytes`, `warnings`; cached per replica for
+  `bastion.microsub.storage-cache-ttl`, 5 minutes). `bastion.microsub.storage-warn-bytes` / `storage-warn-entries` are
+  off by default and only add `warnings`. Both are backed by `microsub::microsub-stats`. New endpoints are
+  advertised in `ReaderApi.FEATURES`. It checks the Microsub `read` scope (Bearer header only), plus `channels` for
+  bulk delete, and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
   feed fields still work and share its code; they are removed in a later step.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
