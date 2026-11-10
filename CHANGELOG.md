@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.52](https://github.com/jacobsandersen/bastion/compare/v1.3.51...v1.3.52) (2026-11-10)
+
+
+### Features
+
+* **reader:** add private saved folders with frozen entry copies ([#142](https://github.com/jacobsandersen/bastion/issues/142)) ([6308f40](https://github.com/jacobsandersen/bastion/commit/6308f40b05c21d4e30ad51c8961123f56dd1a9d2))
+
 ## [1.3.51](https://github.com/jacobsandersen/bastion/compare/v1.3.50...v1.3.51) (2026-11-10)
 
 
