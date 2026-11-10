@@ -657,6 +657,68 @@ class SavedIntegrationTest {
         assertEquals(1, savedRows())
     }
 
+    // --- search --------------------------------------------------------------------------------------------------------
+
+    @Test
+    fun `search finds saved items by their text across folders or within one, and pages`() {
+        pages["/find"] =
+            "text/html" to
+            hFeed(
+                hEntry("p1", "Sourdough starter recipe"),
+                hEntry("p2", "Kotlin coroutines notes"),
+                hEntry("p3", "Sourdough hydration chart"),
+            )
+        val channel = newChannel()
+        follow(channel, "/find")
+        val a = folder("A")
+        val b = folder("B")
+        val ids = saved(channel, "p1", "p2", into = a)
+        val bread = saved(channel, "p3", into = b)
+
+        fun search(
+            q: String,
+            folder: String? = null,
+            limit: Int? = null,
+            after: String? = null,
+        ): JsonNode =
+            json(
+                mockMvc
+                    .perform(
+                        get("/reader/v1/saved/items")
+                            .auth()
+                            .param("q", q)
+                            .apply {
+                                folder?.let { param("folder", it) }
+                                limit?.let { param("limit", it.toString()) }
+                                after?.let { param("after", it) }
+                            },
+                    ).andExpect(status().isOk),
+            )
+
+        assertEquals(setOf(ids[0], bread[0]), search("sourdough")["items"].toList().map { it["_id"].asString() }.toSet())
+        assertEquals(listOf(ids[0]), search("sourdough", folder = a)["items"].toList().map { it["_id"].asString() })
+        assertEquals(listOf(ids[1]), search("kotlin coroutines")["items"].toList().map { it["_id"].asString() })
+        assertEquals(listOf(bread[0]), search("sourdough -starter")["items"].toList().map { it["_id"].asString() })
+        assertEquals(listOf(ids[1]), search("\"coroutines notes\" or nothingelse")["items"].toList().map { it["_id"].asString() })
+        assertEquals(0, search("kotlin sourdough")["items"].size(), "words are ANDed")
+        assertEquals(0, search("absent")["items"].size())
+        assertEquals(3, search("   ")["items"].size(), "a blank query is no query")
+        assertEquals(0, search("&|!:*(")["items"].size(), "punctuation is not query syntax")
+
+        val first = search("sourdough", limit = 1)
+        assertEquals(listOf(bread[0]), first["items"].toList().map { it["_id"].asString() })
+        val second = search("sourdough", limit = 1, after = first["paging"]["after"].asString())
+        assertEquals(listOf(ids[0]), second["items"].toList().map { it["_id"].asString() })
+
+        // The author's name is searchable too, and a removed item is no longer found.
+        assertEquals(3, search("alice")["items"].size())
+        mockMvc.perform(delete("/reader/v1/saved/items/${ids[0]}").auth()).andExpect(status().isOk)
+        assertEquals(listOf(bread[0]), search("sourdough")["items"].toList().map { it["_id"].asString() })
+        mockMvc
+            .perform(get("/reader/v1/saved/items").auth().param("q", "x").param("folder", "nope"))
+            .andExpect(status().isBadRequest)
+    }
+
     // --- deleting folders ----------------------------------------------------------------------------------------------
 
     @Test

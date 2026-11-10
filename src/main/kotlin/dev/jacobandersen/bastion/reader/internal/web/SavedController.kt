@@ -96,17 +96,19 @@ class SavedController(
 
     /**
      * A page of items, newest saved first: `{items, paging: {after}}`. `folder` limits it to one folder; without it
-     * every folder is read. `summary=ids` answers only `{id, entry, url, saved_at}` per item, for syncing.
+     * every folder is read. `q` keeps the items matching a web-style full-text search (words are ANDed, `"phrases"`,
+     * `or` and `-exclusions` work) over their name, summary, content, author name and categories. `summary=ids` answers only `{id, entry, url, saved_at}` per item, for syncing.
      */
     @GetMapping("/items")
     fun items(
         @RequestParam(required = false) folder: String?,
+        @RequestParam(required = false) q: String?,
         @RequestParam(required = false) after: String?,
         @RequestParam(required = false) limit: Int?,
         @RequestParam(required = false) summary: String?,
     ): ResponseEntity<Map<String, Any>> {
         requireScope()
-        val page = saved.list(folder?.takeIf { it.isNotBlank() }, null, after, limit)
+        val page = saved.list(folder?.takeIf { it.isNotBlank() }, q, after, limit)
         val items = if (summary == "ids") page.items.map { it.toSummaryBody() } else page.items.map { it.toBody() }
         return noStore(mapOf("items" to items, "paging" to listOfNotNull(page.after?.let { "after" to it }).toMap()))
     }
