@@ -12,16 +12,20 @@ object ReaderApi {
     /** The metadata member advertising the API in the IndieAuth server metadata. */
     const val METADATA_MEMBER = "bastion_reader_api"
 
-    /** The only scope the API checks. Microsub owns the bare `read` scope; the reader API does not define one. */
+    /** The scope every route but the capability document needs. Microsub owns the bare `read` scope; the reader API defines none. */
     const val REQUIRED_SCOPE = "read"
+
+    /** Bulk delete also needs Microsub's `channels` scope, which already covers deleting a whole channel. */
+    const val BULK_DELETE_SCOPE = "channels"
 
     const val FEATURE_REFRESH = "refresh"
     const val FEATURE_EVENTS = "events"
     const val FEATURE_FEED_DETAILS = "feed-details"
     const val FEATURE_ENTRY_CHECK = "entry-check"
     const val FEATURE_DELETED_ENTRIES = "deleted-entries"
+    const val FEATURE_BULK_DELETE = "bulk-delete"
 
     /** New features are additive; [VERSION] changes only for breaking changes. */
     val FEATURES =
-        listOf(FEATURE_REFRESH, FEATURE_EVENTS, FEATURE_FEED_DETAILS, FEATURE_ENTRY_CHECK, FEATURE_DELETED_ENTRIES)
+        listOf(FEATURE_REFRESH, FEATURE_EVENTS, FEATURE_FEED_DETAILS, FEATURE_ENTRY_CHECK, FEATURE_DELETED_ENTRIES, FEATURE_BULK_DELETE)
 }

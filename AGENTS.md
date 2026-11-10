@@ -58,16 +58,16 @@ When updating this file, preserve this bar for all agents and keep entries conci
 - `websub` exposes `websub::websub-subscription` (subscriber API) and `websub::websub-events`
   (`WebsubContentNotifiedEvent`). Publisher and callback internals stay internal.
 - `microsub` exposes `microsub::microsub-events` (`EntryEvents`, the SSE hub), `microsub::microsub-feeds` (feed
-  details and stale-feed refresh) and `microsub::microsub-entries` (entry-status check, deleted-entry reads) only for the `reader` module; the rest is internal. See the Microsub section.
+  details and stale-feed refresh) and `microsub::microsub-entries` (entry-status check, deleted-entry reads, bulk delete) only for the `reader` module; the rest is internal. See the Microsub section.
 - `reader` (`/reader/v1`) has no public surface. It owns the extras Bastion's own client needs beyond the Microsub spec:
   the public capability document (`GET /reader/v1`), `POST /reader/v1/channels/{uid}/refresh`,
   `GET /reader/v1/events`, `GET /reader/v1/channels/{uid}/feeds`, `GET /reader/v1/channels/{uid}/deleted`
   (deleted entries, with a note that they are permanently deleted once their feed drops them) and
   `POST /reader/v1/channels/{uid}/entries/check`
   (up to 500 cached entry ids; answers `gone`: removed/marked, hard-deleted, foreign or malformed ids; JSON or form
-  body; feature `entry-check`; backed by `microsub::microsub-entries`). New endpoints are
-  advertised in `ReaderApi.FEATURES`. It checks the Microsub `read` scope (Bearer header
-  only) and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
+  body; feature `entry-check`; backed by `microsub::microsub-entries`) and `POST /reader/v1/entries/delete` (feature
+  `bulk-delete`, see Microsub). New endpoints are advertised in `ReaderApi.FEATURES`. It checks the Microsub `read`
+  scope (Bearer header only), plus `channels` for bulk delete, and defines no scope of its own. The legacy `/microsub/refresh`, `/microsub/events` and the `format`/`websub`
   feed fields still work and share its code; they are removed in a later step.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
@@ -340,5 +340,13 @@ When updating this file, preserve this bar for all agents and keep entries conci
   `WebmentionReadService.receivedById` and deletes the entry once the webmention is gone (missing, rejected, deleted,
   or a nested copy). A PENDING/ERROR re-verification keeps an existing entry, because settling with unchanged content
   publishes no event; with no entry yet the listener throws so the resubmission job retries after verification.
+- Bulk delete (`EntryBulkDeleteService`, reader `POST /entries/delete`): dry run by default (`matched`, `unread`,
+  `permanent`, `bytes`, `oldest`/`newest` published, `by_channel`); executing needs `dry_run: false` and `expected`
+  (the dry run's `matched`) and does one chunk of 5,000 under a Postgres advisory lock, returning `deleted` and
+  `remaining` for the client to loop on. More matches than `expected` is 409 `scope_changed`, deleting nothing. Read
+  entries only unless `state: "all"` plus `confirm_unread: true`; `channel: global` or no channel needs `feed`,
+  `published_before` or `unfollowed`. Entries go through the single-delete rule: an entry with a feed becomes a marker
+  (an unlisted one is dropped by the feed's next full fetch), an orphan (`feed_id` null, `feed:` key) is hard-deleted.
+  Muted authors are not skipped. Each chunk is logged at INFO with the token's `client_id`.
 - Jackson 3 `JsonNode.map {}` applies the lambda to the node itself and does not iterate. Use `.toList().map` (or
   `mapNotNull`/`take`, which are Kotlin iterable extensions) to iterate array elements.

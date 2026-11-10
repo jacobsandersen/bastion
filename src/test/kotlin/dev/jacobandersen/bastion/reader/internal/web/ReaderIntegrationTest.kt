@@ -43,6 +43,7 @@ import java.net.InetSocketAddress
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import javax.sql.DataSource
 
 @Import(TestcontainersConfiguration::class)
 @SpringBootTest(
@@ -63,6 +64,9 @@ class ReaderIntegrationTest {
 
     @Autowired
     lateinit var refresh: FeedRefreshService
+
+    @Autowired
+    lateinit var dataSource: DataSource
 
     @MockitoBean
     lateinit var tokens: AccessTokenQueryService
@@ -189,9 +193,10 @@ class ReaderIntegrationTest {
             .andExpect(jsonPath("$.api").value("bastion-reader"))
             .andExpect(jsonPath("$.version").value(1))
             .andExpect(jsonPath("$.microsub_endpoint").value("https://bastion.test/microsub"))
-            .andExpect(jsonPath("$.features", hasSize<Any>(5)))
-            .andExpect(jsonPath("$.features", hasItems("refresh", "events", "feed-details", "entry-check", "deleted-entries")))
-            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=300, public"))
+            .andExpect(jsonPath("$.features", hasSize<Any>(6)))
+            .andExpect(
+                jsonPath("$.features", hasItems("refresh", "events", "feed-details", "entry-check", "deleted-entries", "bulk-delete")),
+            ).andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=300, public"))
         // A browser client on another origin reads it too, and so can a token holder.
         mockMvc
             .perform(get("/reader/v1").header(HttpHeaders.ORIGIN, "https://reader.example"))
@@ -496,6 +501,316 @@ class ReaderIntegrationTest {
     }
 
     // --- the legacy Microsub extras are untouched --------------------------------------------------------------------
+
+    // --- bulk delete -------------------------------------------------------------------------------------------------
+
+    private fun bulk(
+        scope: Map<String, Any?>?,
+        dryRun: Boolean? = null,
+        expected: Int? = null,
+        confirmUnread: Boolean? = null,
+        token: String = "full",
+    ): ResultActions =
+        mockMvc.perform(
+            post("/reader/v1/entries/delete")
+                .auth(token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    mapper.writeValueAsString(
+                        buildMap {
+                            scope?.let { put("scope", it) }
+                            dryRun?.let { put("dry_run", it) }
+                            expected?.let { put("expected", it) }
+                            confirmUnread?.let { put("confirm_unread", it) }
+                        },
+                    ),
+                ),
+        )
+
+    private fun dryRun(scope: Map<String, Any?>): JsonNode = json(bulk(scope).andExpect(status().isOk))
+
+    private fun execute(
+        scope: Map<String, Any?>,
+        expected: Int,
+        confirmUnread: Boolean? = null,
+    ): ResultActions = bulk(scope, dryRun = false, expected = expected, confirmUnread = confirmUnread)
+
+    private fun rows(channel: String): Int =
+        jdbc
+            .sql("select count(*) from microsub_entries e join microsub_channels c on c.id = e.channel_id where c.uid = :uid")
+            .param("uid", channel)
+            .query(Int::class.java)
+            .single()
+
+    private fun liveRows(channel: String): Int =
+        jdbc
+            .sql(
+                "select count(*) from microsub_entries e join microsub_channels c on c.id = e.channel_id where c.uid = :uid and e.removed_at is null",
+            ).param("uid", channel)
+            .query(Int::class.java)
+            .single()
+
+    @Test
+    fun `bulk delete needs the read and channels scopes and a bearer token`() {
+        val scope = mapOf("channel" to "home")
+        mockMvc
+            .perform(post("/reader/v1/entries/delete").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isUnauthorized)
+        bulk(scope, token = "readonly")
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.error").value("insufficient_scope"))
+            .andExpect(jsonPath("$.error_description").value(org.hamcrest.Matchers.containsString("channels")))
+        bulk(
+            scope,
+            token = "noread",
+        ).andExpect(status().isForbidden).andExpect(jsonPath("$.error_description").value(org.hamcrest.Matchers.containsString("read")))
+    }
+
+    @Test
+    fun `a dry run reports the count, size and range and deletes nothing`() {
+        pages["/dry"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/dry")
+
+        val all = dryRun(mapOf("channel" to channel))
+        assertEquals(3, all["matched"].asInt())
+        assertEquals(0, all["unread"].asInt())
+        assertEquals(0, all["permanent"].asInt())
+        assertTrue(all["bytes"].asLong() > 0)
+        assertEquals("2026-11-01T10:00:00Z", all["oldest"].asString())
+        assertEquals("2026-11-03T10:00:00Z", all["newest"].asString())
+        assertEquals(channel, all["by_channel"].single()["uid"].asString())
+        assertEquals(3, all["by_channel"].single()["matched"].asInt())
+
+        val older = dryRun(mapOf("channel" to channel, "published_before" to "2026-11-03T00:00:00Z"))
+        assertEquals(2, older["matched"].asInt(), "age counts by the published date")
+        assertEquals(3, dryRun(mapOf("channel" to channel, "feed" to "$base/dry"))["matched"].asInt())
+        assertEquals(0, dryRun(mapOf("channel" to channel, "feed" to "$base/elsewhere"))["matched"].asInt())
+        assertEquals(0, dryRun(mapOf("channel" to channel, "unfollowed" to true))["matched"].asInt())
+        // Spelling out dry_run: true is the same as leaving it out.
+        assertEquals(3, json(bulk(mapOf("channel" to channel), dryRun = true).andExpect(status().isOk))["matched"].asInt())
+        assertEquals(3, liveRows(channel))
+    }
+
+    @Test
+    fun `bulk delete refuses vague, malformed and unknown scopes`() {
+        fun bad(
+            scope: Map<String, Any?>?,
+            fragment: String,
+        ) = bulk(scope)
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value("invalid_request"))
+            .andExpect(jsonPath("$.error_description").value(org.hamcrest.Matchers.containsString(fragment)))
+
+        bad(null, "scope")
+        bad(emptyMap(), "Name a channel")
+        bad(mapOf("channel" to "global"), "Name a channel")
+        bad(mapOf("state" to "all"), "Name a channel")
+        bad(mapOf("channel" to "home", "state" to "unread"), "state")
+        bad(mapOf("channel" to "home", "published_before" to "last week"), "published_before")
+        bulk(mapOf("channel" to "no-such-channel"))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.error").value("not_found"))
+        // Narrow enough without a channel.
+        bulk(mapOf("published_before" to "2000-01-01T00:00:00Z")).andExpect(status().isOk)
+        bulk(mapOf("channel" to "global", "unfollowed" to true)).andExpect(status().isOk)
+    }
+
+    @Test
+    fun `executing without the dry run's count is a 400 and deletes nothing`() {
+        pages["/noexp"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"))
+        val channel = newChannel()
+        follow(channel, "/noexp")
+
+        bulk(mapOf("channel" to channel), dryRun = false)
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value("invalid_request"))
+            .andExpect(jsonPath("$.error_description").value(org.hamcrest.Matchers.containsString("expected")))
+        execute(mapOf("channel" to channel), expected = -1).andExpect(status().isBadRequest)
+        assertEquals(2, liveRows(channel))
+    }
+
+    @Test
+    fun `executing is refused with 409 when more entries match than were expected`() {
+        pages["/grow"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"))
+        val channel = newChannel()
+        follow(channel, "/grow")
+        val shown = dryRun(mapOf("channel" to channel))["matched"].asInt()
+
+        // A fetch stores another entry between the dry run and the execution.
+        pages["/grow"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        refresh.refreshClaimed(feedId(channel))
+        jdbc.sql("update microsub_entries set is_read = true where url like '%/p3'").update() // new entries arrive unread
+
+        execute(mapOf("channel" to channel), expected = shown)
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").value("scope_changed"))
+            .andExpect(jsonPath("$.matched").value(3))
+            .andExpect(jsonPath("$.expected").value(2))
+        assertEquals(3, liveRows(channel), "nothing was deleted")
+
+        // Quoting the new count goes through. Fewer than expected is fine too.
+        execute(mapOf("channel" to channel), expected = 10)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deleted").value(3))
+            .andExpect(jsonPath("$.remaining").value(0))
+    }
+
+    @Test
+    fun `bulk delete marks entries a feed lists, so they stay deleted, and re-running it is a no-op`() {
+        pages["/mark"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/mark")
+        val scope = mapOf("channel" to channel, "published_before" to "2026-11-03T00:00:00Z")
+
+        execute(scope, expected = 2)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deleted").value(2))
+            .andExpect(jsonPath("$.remaining").value(0))
+        assertEquals(
+            listOf(
+                "$base/p3",
+            ),
+            json(mockMvc.perform(get("/microsub").auth().param("action", "timeline").param("channel", channel)))["items"].toList().map {
+                it["url"].asString()
+            },
+        )
+        assertEquals(3, rows(channel), "the deleted entries stay as markers while their feed lists them")
+        assertEquals(2, json(mockMvc.perform(get("/reader/v1/channels/$channel/deleted").auth()))["items"].size())
+
+        // The same call again finds nothing left, however often it is repeated.
+        repeat(2) {
+            execute(scope, expected = 2)
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.deleted").value(0))
+                .andExpect(jsonPath("$.remaining").value(0))
+        }
+        assertEquals(0, dryRun(scope)["matched"].asInt())
+
+        // A fetch that still lists them does not bring them back; one that no longer does drops the markers.
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(1, liveRows(channel))
+        pages["/mark"] = "text/html" to hFeed(hEntry("p3", "Three"))
+        refresh.refreshClaimed(feedId(channel))
+        assertEquals(1, rows(channel))
+    }
+
+    @Test
+    fun `bulk delete removes the entries of unfollowed feeds for good`() {
+        pages["/gone"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"))
+        pages["/kept"] = "text/html" to hFeed(hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/gone")
+        follow(channel, "/kept")
+        mockMvc
+            .perform(
+                post("/microsub")
+                    .auth("full")
+                    .param("action", "unfollow")
+                    .param("channel", channel)
+                    .param("url", "$base/gone"),
+            ).andExpect(status().isOk)
+        assertEquals(3, rows(channel), "unfollowing leaves the entries behind")
+
+        val preview = dryRun(mapOf("channel" to channel, "unfollowed" to true))
+        assertEquals(2, preview["matched"].asInt())
+        assertEquals(2, preview["permanent"].asInt())
+        execute(mapOf("channel" to channel, "unfollowed" to true), expected = 2)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deleted").value(2))
+        assertEquals(1, rows(channel), "the entries of the unfollowed feed are gone, not marked")
+        assertEquals(
+            emptyList<String>(),
+            json(mockMvc.perform(get("/reader/v1/channels/$channel/deleted").auth()))["items"].toList().map {
+                it.toString()
+            },
+        )
+    }
+
+    @Test
+    fun `unread entries are only deleted with state all and an explicit confirmation`() {
+        pages["/unr"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/unr")
+        jdbc.sql("update microsub_entries set is_read = false where url like '%/p3'").update()
+        assertEquals(1, unread(channel))
+
+        // Read entries only by default: the unread one is neither counted nor deleted.
+        val readOnly = mapOf("channel" to channel)
+        assertEquals(2, dryRun(readOnly)["matched"].asInt())
+        execute(readOnly, expected = 2).andExpect(status().isOk).andExpect(jsonPath("$.deleted").value(2))
+        assertEquals(1, unread(channel))
+
+        val everything = mapOf("channel" to channel, "state" to "all")
+        val preview = dryRun(everything)
+        assertEquals(1, preview["matched"].asInt())
+        assertEquals(1, preview["unread"].asInt())
+        // The second confirmation is part of the request, not the dry run.
+        execute(everything, expected = 1)
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error_description").value(org.hamcrest.Matchers.containsString("confirm_unread")))
+        execute(everything, expected = 1, confirmUnread = false).andExpect(status().isBadRequest)
+        assertEquals(1, unread(channel))
+
+        execute(everything, expected = 1, confirmUnread = true)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deleted").value(1))
+            .andExpect(jsonPath("$.remaining").value(0))
+        assertEquals(0, unread(channel))
+        assertEquals(0, liveRows(channel))
+    }
+
+    @Test
+    fun `a large delete runs in chunks of 5000 that the client loops until none remain`() {
+        val channel = newChannel()
+        val total = 12_000
+        // Entries a feed no longer owns, so the chunks hard-delete them.
+        jdbc
+            .sql(
+                """
+                insert into microsub_entries (id, channel_id, feed_id, source_key, published, data, is_read, created_at, updated_at, last_seen_at)
+                select gen_random_uuid(), c.id, null, 'feed:https://old.example/feed:' || n, now() - interval '400 days', '{}'::jsonb, true, now(), now(), now()
+                from microsub_channels c, generate_series(1, :total) n where c.uid = :uid
+                """.trimIndent(),
+            ).param("total", total)
+            .param("uid", channel)
+            .update()
+        val scope = mapOf("channel" to channel, "unfollowed" to true)
+        val expected = dryRun(scope)["matched"].asInt()
+        assertEquals(total, expected)
+
+        val deleted = mutableListOf<Int>()
+        var remaining = expected
+        while (remaining > 0) {
+            val chunk = json(execute(scope, expected).andExpect(status().isOk))
+            deleted += chunk["deleted"].asInt()
+            assertTrue(chunk["deleted"].asInt() > 0, "every call makes progress")
+            remaining = chunk["remaining"].asInt()
+        }
+        assertEquals(listOf(5000, 5000, 2000), deleted)
+        assertEquals(0, rows(channel))
+    }
+
+    @Test
+    fun `only one bulk delete runs at a time`() {
+        pages["/busy"] = "text/html" to hFeed(hEntry("p1", "One"))
+        val channel = newChannel()
+        follow(channel, "/busy")
+        val scope = mapOf("channel" to channel)
+
+        dataSource.connection.use { held ->
+            held.createStatement().use { it.execute("select pg_advisory_lock(7424117001)") }
+            try {
+                execute(scope, expected = 1)
+                    .andExpect(status().isConflict)
+                    .andExpect(jsonPath("$.error").value("busy"))
+                assertEquals(1, liveRows(channel))
+            } finally {
+                held.createStatement().use { it.execute("select pg_advisory_unlock(7424117001)") }
+            }
+        }
+        execute(scope, expected = 1).andExpect(status().isOk).andExpect(jsonPath("$.deleted").value(1))
+    }
 
     @Test
     fun `the Microsub feed objects carry no reader details and the legacy routes are gone`() {
