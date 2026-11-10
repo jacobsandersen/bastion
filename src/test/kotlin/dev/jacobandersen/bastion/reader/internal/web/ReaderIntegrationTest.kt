@@ -195,7 +195,7 @@ class ReaderIntegrationTest {
             .andExpect(jsonPath("$.api").value("bastion-reader"))
             .andExpect(jsonPath("$.version").value(1))
             .andExpect(jsonPath("$.microsub_endpoint").value("https://bastion.test/microsub"))
-            .andExpect(jsonPath("$.features", hasSize<Any>(8)))
+            .andExpect(jsonPath("$.features", hasSize<Any>(9)))
             .andExpect(
                 jsonPath(
                     "$.features",
@@ -208,6 +208,7 @@ class ReaderIntegrationTest {
                         "bulk-delete",
                         "unread-totals",
                         "storage",
+                        "saved",
                     ),
                 ),
             ).andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=300, public"))

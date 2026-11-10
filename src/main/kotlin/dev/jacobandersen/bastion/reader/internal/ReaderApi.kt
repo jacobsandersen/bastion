@@ -26,6 +26,10 @@ object ReaderApi {
     const val FEATURE_BULK_DELETE = "bulk-delete"
     const val FEATURE_UNREAD_TOTALS = "unread-totals"
     const val FEATURE_STORAGE = "storage"
+    const val FEATURE_SAVED = "saved"
+
+    /** Saving folder structure changes (create, rename, delete a folder) also needs Microsub's `channels` scope. */
+    const val SAVED_FOLDER_SCOPE = "channels"
 
     /** New features are additive; [VERSION] changes only for breaking changes. */
     val FEATURES =
@@ -38,5 +42,6 @@ object ReaderApi {
             FEATURE_BULK_DELETE,
             FEATURE_UNREAD_TOTALS,
             FEATURE_STORAGE,
+            FEATURE_SAVED,
         )
 }

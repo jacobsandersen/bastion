@@ -34,6 +34,23 @@ class ReaderError(
 
         fun busy() = ReaderError(HttpStatus.CONFLICT, "busy", "Another bulk delete is running; try again shortly")
 
+        /** Microsub has no `not_found` error, so an unknown folder is a bad request, like an unknown channel in Microsub. */
+        fun folderNotFound(uid: String) = ReaderError(HttpStatus.BAD_REQUEST, "invalid_request", "Folder '$uid' does not exist")
+
+        fun entryNotFound(id: String) = ReaderError(HttpStatus.NOT_FOUND, "entry_not_found", "Entry '$id' does not exist (any more)")
+
+        fun itemNotFound(id: String) = ReaderError(HttpStatus.NOT_FOUND, "not_found", "Saved item '$id' does not exist")
+
+        fun folderChanged(
+            items: Int,
+            expected: Int,
+        ) = ReaderError(
+            HttpStatus.CONFLICT,
+            "folder_changed",
+            "The folder holds $items items now but $expected were expected; read it again",
+            mapOf("items" to items, "expected" to expected),
+        )
+
         fun channelNotFound(uid: String) = ReaderError(HttpStatus.NOT_FOUND, "not_found", "Channel '$uid' does not exist")
     }
 }

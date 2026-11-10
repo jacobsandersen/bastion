@@ -12,16 +12,10 @@ import dev.jacobandersen.bastion.microsub.feeds.FeedStateQueryService
 import dev.jacobandersen.bastion.microsub.stats.StorageQueryService
 import dev.jacobandersen.bastion.microsub.stats.UnreadQueryService
 import dev.jacobandersen.bastion.reader.internal.ReaderApi
-import dev.jacobandersen.bastion.reader.internal.security.ReaderAuthentication
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.CacheControl
-import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
-import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.web.ErrorResponse
-import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -33,8 +27,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeParseException
-
-private val logger = KotlinLogging.logger {}
 
 /**
  * Bastion's reader API: the capability document, on-demand refresh, the live entries stream, feed details, the entry check, deleted
@@ -246,35 +238,6 @@ class ReaderController(
             put("format", feed.format)
             feed.websub?.let { put("websub", it) }
         }
-
-    private fun requireScope(scope: String = ReaderApi.REQUIRED_SCOPE): ReaderAuthentication {
-        val auth = SecurityContextHolder.getContext().authentication as? ReaderAuthentication ?: throw ReaderError.unauthorized()
-        if (scope !in auth.scopes) throw ReaderError.insufficientScope(scope)
-        return auth
-    }
-
-    // An explicit JSON content type keeps these answers valid for the event stream route, whose Accept is text/event-stream.
-    @ExceptionHandler(ReaderError::class)
-    fun handle(error: ReaderError): ResponseEntity<Map<String, Any>> =
-        ResponseEntity.status(error.status).contentType(MediaType.APPLICATION_JSON).body(error.body())
-
-    /** Anything else keeps the `error`/`error_description` shape: framework 4xx errors map to `invalid_request`. */
-    @ExceptionHandler(Exception::class)
-    fun handleUnexpected(error: Exception): ResponseEntity<Map<String, Any>> {
-        if (error is ErrorResponse && error.statusCode.is4xxClientError) {
-            val body = ReaderError(HttpStatus.valueOf(error.statusCode.value()), "invalid_request", error.body.detail ?: "Invalid request")
-            return ResponseEntity
-                .status(body.status)
-                .headers(error.headers)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body.body())
-        }
-        logger.error(error) { "Unexpected error handling a reader API request" }
-        return ResponseEntity
-            .status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(mapOf("error" to "server_error", "error_description" to "The request could not be processed"))
-    }
 
     private companion object {
         val CAPABILITIES_MAX_AGE: Duration = Duration.ofMinutes(5)
