@@ -871,6 +871,24 @@ class SavedIntegrationTest {
     }
 
     @Test
+    fun `a folder moved after sibling deletions lands last, not among its siblings`() {
+        val parent = folder("Gap parent")
+        val gone = folder("Gap gone", parent)
+        val keepA = folder("Gap a", parent)
+        val keepB = folder("Gap b", parent)
+        mockMvc.perform(delete("/reader/v1/saved/folders/$gone").auth()).andExpect(status().isOk)
+        val moved = folder("Gap moved")
+        patchFolder(moved, "parent" to parent).andExpect(status().isOk)
+
+        val order =
+            json(mockMvc.perform(get("/reader/v1/saved/folders").auth()))["items"]
+                .toList()
+                .map { it["uid"].asString() }
+                .filter { it in setOf(keepA, keepB, moved) }
+        assertEquals(listOf(keepA, keepB, moved), order)
+    }
+
+    @Test
     fun `deleting a subtree can move all its items elsewhere and move_up refuses a name clash`() {
         pages["/mv2"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"))
         val channel = newChannel()

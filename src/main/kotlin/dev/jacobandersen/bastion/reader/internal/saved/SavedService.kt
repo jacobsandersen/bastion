@@ -38,6 +38,9 @@ internal class FolderTree(
     /** The children of [parentId] (null: the top level), in order. */
     fun children(parentId: UUID?): List<SavedFolder> = byParent[parentId].orEmpty()
 
+    /** A position after every current child of [parentId]; child counts would collide once deletions leave gaps. */
+    fun nextPosition(parentId: UUID?): Int = (children(parentId).maxOfOrNull { it.position } ?: -1) + 1
+
     fun descendants(folder: SavedFolder): List<SavedFolder> = children(folder.id).flatMap { listOf(it) + descendants(it) }
 
     /** 1 for a top-level folder. */
@@ -114,7 +117,7 @@ class SavedService(
         var uid = base
         var suffix = 2
         while (folders.uidExists(uid)) uid = "$base-${suffix++}"
-        val folder = folders.insert(uid, trimmed, parent?.id, tree.children(parent?.id).size, now())
+        val folder = folders.insert(uid, trimmed, parent?.id, tree.nextPosition(parent?.id), now())
         return requireNotNull(folders.summary(folder.id))
     }
 
@@ -157,7 +160,7 @@ class SavedService(
         val now = now()
         if (newName != folder.name) folders.rename(folder.id, newName, now)
         if (parentChanged) {
-            folders.setParent(folder.id, parent?.id, tree.children(parent?.id).size, now)
+            folders.setParent(folder.id, parent?.id, tree.nextPosition(parent?.id), now)
             // The subtrees of both old and new ancestors changed membership.
             bump(listOfNotNull(folder.parentId, parent?.id), tree, now)
         }
@@ -212,7 +215,14 @@ class SavedService(
                 .firstOrNull { kid ->
                     siblings.any { it.name.equals(kid.name, ignoreCase = true) }
                 }?.let { throw ReaderError.nameTaken(it.name) }
-            kids.forEachIndexed { index, kid -> folders.setParent(kid.id, folder.parentId, siblings.size + index, now) }
+            kids.forEachIndexed { index, kid ->
+                folders.setParent(
+                    kid.id,
+                    folder.parentId,
+                    (siblings.maxOfOrNull { it.position } ?: -1) + 1 + index,
+                    now,
+                )
+            }
         }
         if (target != null) doomed.forEach { moved += items.moveAll(it.id, target.id, now) }
         folders.delete(folder.id)
