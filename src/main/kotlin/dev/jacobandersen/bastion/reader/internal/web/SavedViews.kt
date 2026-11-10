@@ -7,10 +7,12 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-internal fun SavedFolderSummary.toBody(): Map<String, Any> =
+/** `parent` is the parent folder's uid, null at the top level; `position` orders the siblings; `count` and `bytes` are the folder's own items. */
+internal fun SavedFolderSummary.toBody(): Map<String, Any?> =
     mapOf(
         "uid" to folder.uid,
         "name" to folder.name,
+        "parent" to parentUid,
         "position" to folder.position,
         "count" to count,
         "bytes" to bytes,
@@ -55,5 +57,14 @@ internal fun SavedStorage.toBody(): Map<String, Any> =
         "folders" to folders.size,
         "on_disk_bytes" to onDiskBytes,
         "payload_bytes" to payloadBytes,
-        "by_folder" to folders.map { mapOf("uid" to it.folder.uid, "name" to it.folder.name, "items" to it.count, "bytes" to it.bytes) },
+        "by_folder" to
+            folders.map {
+                mapOf(
+                    "uid" to it.folder.uid,
+                    "name" to it.folder.name,
+                    "parent" to it.parentUid,
+                    "items" to it.count,
+                    "bytes" to it.bytes,
+                )
+            },
     )

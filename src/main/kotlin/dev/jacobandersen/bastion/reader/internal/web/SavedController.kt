@@ -27,45 +27,71 @@ class SavedController(
     private val saved: SavedService,
 ) {
     @GetMapping("/folders")
-    fun folders(): ResponseEntity<Map<String, Any>> {
+    fun folders(): ResponseEntity<Map<String, Any?>> {
         requireScope()
         return noStore(mapOf("items" to saved.listFolders().map { it.toBody() }))
     }
 
+    /** Creates a folder. `name` is required; `parent` (a folder uid) nests it, at most 5 levels deep. Sibling names are unique. */
     @PostMapping("/folders", consumes = [MediaType.APPLICATION_JSON_VALUE])
     fun createFolder(
-        @RequestBody body: SavedFolderCreateRequest,
-    ): ResponseEntity<Map<String, Any>> {
+        @RequestBody body: Map<String, Any?>,
+    ): ResponseEntity<Map<String, Any?>> {
         requireFolderScopes()
-        return ResponseEntity
-            .status(HttpStatus.CREATED)
-            .cacheControl(CacheControl.noStore())
-            .body(saved.createFolder(body.name).toBody())
-    }
-
-    @PatchMapping("/folders/{uid}", consumes = [MediaType.APPLICATION_JSON_VALUE])
-    fun updateFolder(
-        @PathVariable uid: String,
-        @RequestBody body: SavedFolderUpdateRequest,
-    ): ResponseEntity<Map<String, Any>> {
-        requireFolderScopes()
-        if (body.name == null && body.position == null) throw ReaderError.invalidRequest("Give 'name' and/or 'position'")
-        return noStore(saved.updateFolder(uid, body.name, body.position).toBody())
+        val result = saved.createFolder(text(body, "name"), text(body, "parent"))
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(result.toBody())
     }
 
     /**
-     * Deletes the folder. With `move_to` another folder takes its items; otherwise `items` must be the item count the
-     * owner was shown (409 `folder_changed` when it no longer is, deleting nothing). An empty folder needs neither.
+     * Renames (`name`), nests or un-nests (`parent`: a folder uid, or null for the top level) and/or reorders
+     * (`position`, zero-based among the siblings) the folder. A move into itself or its subtree, or deeper than 5 levels, is
+     * 400; a sibling name that is taken is 409 `name_taken`.
+     */
+    @PatchMapping("/folders/{uid}", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun updateFolder(
+        @PathVariable uid: String,
+        @RequestBody body: Map<String, Any?>,
+    ): ResponseEntity<Map<String, Any?>> {
+        requireFolderScopes()
+        val position =
+            when (val value = body["position"]) {
+                null -> null
+                is Int -> value
+                else -> throw ReaderError.invalidRequest("'position' must be a whole number")
+            }
+        if (body["name"] == null && position == null && !body.containsKey("parent")) {
+            throw ReaderError.invalidRequest("Give 'name', 'parent' and/or 'position'")
+        }
+        return noStore(saved.updateFolder(uid, text(body, "name"), body.containsKey("parent"), text(body, "parent"), position).toBody())
+    }
+
+    private fun text(
+        body: Map<String, Any?>,
+        key: String,
+    ): String? =
+        when (val value = body[key]) {
+            null -> null
+            is String -> value
+            else -> throw ReaderError.invalidRequest("'$key' must be text")
+        }
+
+    /**
+     * Deletes the folder. A folder with subfolders needs `children`: `move_up` gives them to the folder's parent,
+     * `delete` removes the whole subtree (409 `folder_has_children` without it). The items to be deleted need `move_to`
+     * (another folder, not in the deleted subtree, takes them) or `items`, the item count the owner was shown (all items of
+     * the subtree for `children=delete`; 409 `folder_changed` when it no longer is, deleting nothing). An empty folder needs
+     * neither. Answers `{deleted, moved, folders}`.
      */
     @DeleteMapping("/folders/{uid}")
     fun deleteFolder(
         @PathVariable uid: String,
         @RequestParam("move_to", required = false) moveTo: String?,
         @RequestParam(required = false) items: Int?,
+        @RequestParam(required = false) children: String?,
     ): ResponseEntity<Map<String, Any>> {
         requireFolderScopes()
-        val result = saved.deleteFolder(uid, moveTo?.takeIf { it.isNotBlank() }, items)
-        return noStore(mapOf("deleted" to result.deleted, "moved" to result.moved))
+        val result = saved.deleteFolder(uid, moveTo?.takeIf { it.isNotBlank() }, items, children?.takeIf { it.isNotBlank() })
+        return noStore(mapOf("deleted" to result.deleted, "moved" to result.moved, "folders" to result.folders))
     }
 
     /** Saves an entry into a folder: 201 with the new item, 200 with the existing one when the folder already holds it. */
@@ -95,8 +121,8 @@ class SavedController(
     }
 
     /**
-     * A page of items, newest saved first: `{items, paging: {after}}`. `folder` limits it to one folder; without it
-     * every folder is read. `q` keeps the items matching a web-style full-text search (words are ANDed, `"phrases"`,
+     * A page of items, newest saved first: `{items, paging: {after}}`. `folder` limits it to one folder, and with `descendants=true`
+     * to it and all its subfolders; without `folder` every folder is read. `q` keeps the items matching a web-style full-text search (words are ANDed, `"phrases"`,
      * `or` and `-exclusions` work) over their name, summary, content, author name and categories. `summary=ids` answers only `{id, entry, url, saved_at}` per item, for syncing.
      */
     @GetMapping("/items")
@@ -106,9 +132,10 @@ class SavedController(
         @RequestParam(required = false) after: String?,
         @RequestParam(required = false) limit: Int?,
         @RequestParam(required = false) summary: String?,
+        @RequestParam(required = false) descendants: Boolean?,
     ): ResponseEntity<Map<String, Any>> {
         requireScope()
-        val page = saved.list(folder?.takeIf { it.isNotBlank() }, q, after, limit)
+        val page = saved.list(folder?.takeIf { it.isNotBlank() }, q, after, limit, descendants == true)
         val items = if (summary == "ids") page.items.map { it.toSummaryBody() } else page.items.map { it.toBody() }
         return noStore(mapOf("items" to items, "paging" to listOfNotNull(page.after?.let { "after" to it }).toMap()))
     }

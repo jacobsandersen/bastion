@@ -11,6 +11,8 @@ data class SavedFolder(
     val id: UUID,
     val uid: String,
     val name: String,
+    /** The folder this one is nested in; null for a top-level folder. */
+    val parentId: UUID?,
     val position: Int,
     val version: Long,
 )
@@ -18,6 +20,7 @@ data class SavedFolder(
 /** A folder with what it holds. [bytes] is the size of its item rows (whole rows, `pg_column_size`). */
 data class SavedFolderSummary(
     val folder: SavedFolder,
+    val parentUid: String?,
     val count: Long,
     val bytes: Long,
 )
@@ -32,14 +35,19 @@ class SavedFolderRepository(
         jdbc
             .sql(
                 """
-                select f.*, count(i.id) as item_count, coalesce(sum(pg_column_size(i.*)), 0) as item_bytes
+                select f.*, p.uid as parent_uid, count(i.id) as item_count, coalesce(sum(pg_column_size(i.*)), 0) as item_bytes
                 from reader_saved_folders f
+                left join reader_saved_folders p on p.id = f.parent_id
                 left join reader_saved_items i on i.folder_id = f.id
-                group by f.id
+                group by f.id, p.uid
                 order by f.position, f.created_at, f.id
                 """.trimIndent(),
-            ).query { rs, row -> SavedFolderSummary(map(rs, row), rs.getLong("item_count"), rs.getLong("item_bytes")) }
-            .list()
+            ).query {
+                rs,
+                row,
+                ->
+                SavedFolderSummary(map(rs, row), rs.getString("parent_uid"), rs.getLong("item_count"), rs.getLong("item_bytes"))
+            }.list()
 
     fun summary(id: UUID): SavedFolderSummary? = summaries().firstOrNull { it.folder.id == id }
 
@@ -67,15 +75,10 @@ class SavedFolderRepository(
             .query(Boolean::class.java)
             .single()
 
-    fun nextPosition(): Int =
-        jdbc
-            .sql("select coalesce(max(position), -1) + 1 from reader_saved_folders")
-            .query(Int::class.java)
-            .single()
-
     fun insert(
         uid: String,
         name: String,
+        parentId: UUID?,
         position: Int,
         now: Instant,
     ): SavedFolder {
@@ -83,16 +86,17 @@ class SavedFolderRepository(
         jdbc
             .sql(
                 """
-                insert into reader_saved_folders (id, uid, name, position, version, created_at, updated_at)
-                values (:id, :uid, :name, :position, 0, :now, :now)
+                insert into reader_saved_folders (id, uid, name, parent_id, position, version, created_at, updated_at)
+                values (:id, :uid, :name, :parent, :position, 0, :now, :now)
                 """.trimIndent(),
             ).param("id", id)
             .param("uid", uid)
             .param("name", name)
+            .param("parent", parentId)
             .param("position", position)
             .param("now", Timestamp.from(now))
             .update()
-        return SavedFolder(id, uid, name, position, 0)
+        return SavedFolder(id, uid, name, parentId, position, 0)
     }
 
     fun rename(
@@ -116,6 +120,21 @@ class SavedFolderRepository(
             .sql("update reader_saved_folders set position = :position where id = :id")
             .param("id", id)
             .param("position", position)
+            .update()
+    }
+
+    fun setParent(
+        id: UUID,
+        parentId: UUID?,
+        position: Int,
+        now: Instant,
+    ) {
+        jdbc
+            .sql("update reader_saved_folders set parent_id = :parent, position = :position, updated_at = :now where id = :id")
+            .param("id", id)
+            .param("parent", parentId)
+            .param("position", position)
+            .param("now", Timestamp.from(now))
             .update()
     }
 
@@ -143,6 +162,7 @@ class SavedFolderRepository(
         id = rs.getObject("id", UUID::class.java),
         uid = rs.getString("uid"),
         name = rs.getString("name"),
+        parentId = rs.getObject("parent_id", UUID::class.java),
         position = rs.getInt("position"),
         version = rs.getLong("version"),
     )

@@ -23,7 +23,44 @@ data class SaveResult(
 data class FolderDeletion(
     val deleted: Int,
     val moved: Int,
+    /** How many folders were removed (more than one when a subtree was deleted). */
+    val folders: Int,
 )
+
+/** The folders as a tree, built from the flat list: lookups by id and uid, children, depth and ancestry. */
+internal class FolderTree(
+    all: List<SavedFolder>,
+) {
+    val byId: Map<UUID?, SavedFolder> = all.associateBy { it.id }
+    val byUid: Map<String, SavedFolder> = all.associateBy { it.uid }
+    private val byParent: Map<UUID?, List<SavedFolder>> = all.groupBy { it.parentId }
+
+    /** The children of [parentId] (null: the top level), in order. */
+    fun children(parentId: UUID?): List<SavedFolder> = byParent[parentId].orEmpty()
+
+    fun descendants(folder: SavedFolder): List<SavedFolder> = children(folder.id).flatMap { listOf(it) + descendants(it) }
+
+    /** 1 for a top-level folder. */
+    fun depth(folder: SavedFolder): Int = ancestorsAndSelf(folder).size
+
+    /** Levels of the subtree under and including [folder]: 1 for a folder with no subfolders. */
+    fun height(folder: SavedFolder): Int = 1 + (children(folder.id).maxOfOrNull(::height) ?: 0)
+
+    fun isDescendant(
+        folder: SavedFolder,
+        of: SavedFolder,
+    ): Boolean = ancestorsAndSelf(folder).any { it.id == of.id }
+
+    fun ancestorsAndSelf(folder: SavedFolder): List<SavedFolder> {
+        val chain = mutableListOf(folder)
+        var parent = folder.parentId?.let(byId::get)
+        while (parent != null && chain.none { it.id == parent!!.id }) {
+            chain += parent
+            parent = parent.parentId?.let(byId::get)
+        }
+        return chain
+    }
+}
 
 /** What the saved folders hold. [payloadBytes] is the row size of the items; [onDiskBytes] also counts indexes and free space. */
 data class SavedStorage(
@@ -49,70 +86,138 @@ class SavedService(
     private val stats: SavedStatsRepository,
 ) {
     @Transactional(readOnly = true)
-    fun listFolders(): List<SavedFolderSummary> = folders.summaries()
+    fun listFolders(): List<SavedFolderSummary> = inTreeOrder(folders.summaries())
 
     /** Counts and sizes of everything saved, computed on each call: the tables hold a handful of rows per folder to scan. */
     @Transactional(readOnly = true)
     fun storage(): SavedStorage {
-        val summaries = folders.summaries()
+        val summaries = inTreeOrder(folders.summaries())
         return SavedStorage(summaries.sumOf { it.count }, summaries, summaries.sumOf { it.bytes }, stats.onDiskBytes())
     }
 
+    /** Creates a folder, nested in [parentUid] when given (at most [MAX_DEPTH] levels deep). Sibling names are unique. */
     @Transactional
-    fun createFolder(name: String?): SavedFolderSummary {
+    fun createFolder(
+        name: String?,
+        parentUid: String?,
+    ): SavedFolderSummary {
         val trimmed = requireName(name)
+        val tree = FolderTree(folders.list())
+        val parent = parentUid?.let { tree.byUid[it] ?: throw ReaderError.folderNotFound(it) }
+        if ((parent?.let(tree::depth) ?: 0) + 1 >
+            MAX_DEPTH
+        ) {
+            throw ReaderError.invalidRequest("Folders can be nested at most $MAX_DEPTH deep")
+        }
+        requireNameFree(tree, parent?.id, trimmed, except = null)
         val base = slugify.slugify(trimmed).take(MAX_UID).ifBlank { "folder" }
         var uid = base
         var suffix = 2
         while (folders.uidExists(uid)) uid = "$base-${suffix++}"
-        val folder = folders.insert(uid, trimmed, folders.nextPosition(), now())
-        return SavedFolderSummary(folder, 0, 0)
+        val folder = folders.insert(uid, trimmed, parent?.id, tree.children(parent?.id).size, now())
+        return requireNotNull(folders.summary(folder.id))
     }
 
-    /** Renames and/or moves the folder to [position] (0 is first) among the others. Its uid never changes. */
+    /**
+     * Renames the folder, and/or moves it under [parentUid] ([moveParent] true; null parent = top level), and/or puts it
+     * at [position] (0 is first) among its siblings. A moved folder with no [position] goes last. Its uid never changes.
+     * A move that would put a folder inside itself or its own subtree, or nest anything deeper than [MAX_DEPTH], is refused.
+     */
     @Transactional
     fun updateFolder(
         uid: String,
         name: String?,
+        moveParent: Boolean,
+        parentUid: String?,
         position: Int?,
     ): SavedFolderSummary {
         val folder = folders.lockByUid(uid) ?: throw ReaderError.folderNotFound(uid)
-        if (name != null) folders.rename(folder.id, requireName(name), now())
+        val tree = FolderTree(folders.list())
+        val newName = if (name != null) requireName(name) else folder.name
+        val parent =
+            if (moveParent) {
+                parentUid?.let {
+                    tree.byUid[it] ?: throw ReaderError.folderNotFound(
+                        it,
+                    )
+                }
+            } else {
+                tree.byId[folder.parentId]
+            }
+        val parentChanged = moveParent && parent?.id != folder.parentId
+        if (parentChanged) {
+            if (parent != null && (parent.id == folder.id || tree.isDescendant(parent, folder))) {
+                throw ReaderError.invalidRequest("A folder cannot be moved into itself or one of its subfolders")
+            }
+            if ((parent?.let(tree::depth) ?: 0) + tree.height(folder) > MAX_DEPTH) {
+                throw ReaderError.invalidRequest("Folders can be nested at most $MAX_DEPTH deep")
+            }
+        }
+        if (parentChanged || newName != folder.name) requireNameFree(tree, parent?.id, newName, except = folder.id)
+        val now = now()
+        if (newName != folder.name) folders.rename(folder.id, newName, now)
+        if (parentChanged) {
+            folders.setParent(folder.id, parent?.id, tree.children(parent?.id).size, now)
+            // The subtrees of both old and new ancestors changed membership.
+            bump(listOfNotNull(folder.parentId, parent?.id), tree, now)
+        }
         if (position != null) {
-            val order = folders.list().filter { it.id != folder.id }.toMutableList()
+            val order = folders.list().filter { it.parentId == parent?.id && it.id != folder.id }.toMutableList()
             order.add(position.coerceIn(0, order.size), folder)
-            order.forEachIndexed { index, each -> if (each.position != index) folders.setPosition(each.id, index) }
+            order.forEachIndexed { index, each -> folders.setPosition(each.id, index) }
         }
         return requireNotNull(folders.summary(folder.id))
     }
 
     /**
-     * Deletes the folder. A folder with items needs [moveTo] (another folder takes them; ones it already holds are
-     * dropped) or [expectedItems], the count the owner was shown, which must still be right: otherwise nothing is
-     * deleted (409 `folder_changed`), so a folder never loses more than the owner was told.
+     * Deletes the folder. A folder with subfolders needs [children]: `move_up` reparents them to the deleted folder's
+     * parent, `delete` removes the whole subtree with its items (409 `folder_has_children` without it). The items to be
+     * deleted need [moveTo] (another folder, outside the deleted subtree, takes them; ones it already holds are dropped) or
+     * [expectedItems], the count the owner was shown (for `delete`, all items of the subtree), which must still be right:
+     * otherwise nothing is deleted (409 `folder_changed`), so a folder never loses more than the owner was told.
      */
     @Transactional
     fun deleteFolder(
         uid: String,
         moveTo: String?,
         expectedItems: Int?,
+        children: String?,
     ): FolderDeletion {
         val folder = folders.lockByUid(uid) ?: throw ReaderError.folderNotFound(uid)
-        val count = items.countInFolder(folder.id).toInt()
+        val tree = FolderTree(folders.list())
+        val kids = tree.children(folder.id)
+        if (children != null && children != CHILDREN_MOVE_UP && children != CHILDREN_DELETE) {
+            throw ReaderError.invalidRequest("'children' must be '$CHILDREN_MOVE_UP' or '$CHILDREN_DELETE'")
+        }
+        if (kids.isNotEmpty() && children == null) throw ReaderError.folderHasChildren(kids.size)
+        val doomed = if (children == CHILDREN_DELETE) listOf(folder) + tree.descendants(folder) else listOf(folder)
+        val doomedIds = doomed.map { it.id }.toSet()
+        val count = items.countInFolders(doomedIds).toInt()
+        val now = now()
+        var moved = 0
+        var target: SavedFolder? = null
         if (moveTo != null) {
-            if (moveTo == uid) throw ReaderError.invalidRequest("'move_to' must name another folder")
-            val target = folders.lockByUid(moveTo) ?: throw ReaderError.folderNotFound(moveTo)
-            val moved = items.moveAll(folder.id, target.id, now())
-            if (moved > 0) folders.bumpVersion(listOf(target.id), now())
-            folders.delete(folder.id)
-            return FolderDeletion(deleted = count - moved, moved = moved)
+            val found = tree.byUid[moveTo] ?: throw ReaderError.folderNotFound(moveTo)
+            if (found.id in doomedIds) throw ReaderError.invalidRequest("'move_to' must name a folder that is not deleted")
+            target = folders.lockByUid(moveTo)
+        } else {
+            if (expectedItems != null && expectedItems != count) throw ReaderError.folderChanged(count, expectedItems)
+            if (count > 0 && expectedItems == null) {
+                throw ReaderError.invalidRequest("Give 'move_to' or 'items' (the number of items to delete, now $count)")
+            }
         }
-        if (expectedItems != null && expectedItems != count) throw ReaderError.folderChanged(count, expectedItems)
-        if (count > 0 && expectedItems == null) {
-            throw ReaderError.invalidRequest("Give 'move_to' or 'items' (the number of items to delete, now $count)")
+        if (children == CHILDREN_MOVE_UP && kids.isNotEmpty()) {
+            val siblings = tree.children(folder.parentId).filter { it.id != folder.id }
+            kids
+                .firstOrNull { kid ->
+                    siblings.any { it.name.equals(kid.name, ignoreCase = true) }
+                }?.let { throw ReaderError.nameTaken(it.name) }
+            kids.forEachIndexed { index, kid -> folders.setParent(kid.id, folder.parentId, siblings.size + index, now) }
         }
+        if (target != null) doomed.forEach { moved += items.moveAll(it.id, target.id, now) }
         folders.delete(folder.id)
-        return FolderDeletion(deleted = count, moved = 0)
+        bump(listOfNotNull(folder.parentId, target?.id), tree, now)
+        return FolderDeletion(deleted = count - moved, moved = moved, folders = doomed.size)
     }
 
     /**
@@ -153,12 +258,12 @@ class SavedService(
                 now,
             )
         if (id == null) return SaveResult(requireNotNull(items.findInFolder(folder.id, key)), created = false)
-        folders.bumpVersion(listOf(folder.id), now)
+        bump(listOf(folder.id), now = now)
         return SaveResult(requireNotNull(items.find(id)), created = true)
     }
 
     /**
-     * Items newest saved first. [folderUid] null reads every folder; [query] filters by full-text search. [limit]
+     * Items newest saved first. [folderUid] null reads every folder; [descendants] adds the folder's subfolders; [query] filters by full-text search. [limit]
      * defaults to 20 and is clamped to 1..100, like Microsub timelines.
      */
     @Transactional(readOnly = true)
@@ -167,10 +272,16 @@ class SavedService(
         query: String?,
         after: String?,
         limit: Int?,
+        descendants: Boolean = false,
     ): SavedPage {
-        val folderId = folderUid?.let { (folders.findByUid(it) ?: throw ReaderError.folderNotFound(it)).id }
+        val folderIds =
+            folderUid?.let {
+                val tree = FolderTree(folders.list())
+                val folder = tree.byUid[it] ?: throw ReaderError.folderNotFound(it)
+                if (descendants) (listOf(folder) + tree.descendants(folder)).map { each -> each.id } else listOf(folder.id)
+            }
         val size = (limit ?: DEFAULT_LIMIT).coerceIn(1, MAX_LIMIT)
-        val rows = items.page(folderId, query?.trim()?.takeIf { it.isNotEmpty() }, SavedCursor.decode(after), size)
+        val rows = items.page(folderIds, query?.trim()?.takeIf { it.isNotEmpty() }, SavedCursor.decode(after), size)
         val page = rows.take(size)
         val next = if (rows.size > size) page.last().let { SavedCursor(it.savedAt, it.id).encode() } else null
         return SavedPage(page, next)
@@ -190,7 +301,7 @@ class SavedService(
         val target = folders.findByUid(folderUid) ?: throw ReaderError.folderNotFound(folderUid)
         val touched = mutableSetOf<UUID>()
         val result = moveOne(item, target, touched)
-        folders.bumpVersion(touched, now())
+        bump(touched, now = now())
         return result
     }
 
@@ -220,7 +331,7 @@ class SavedService(
                 val target = folders.findByUid(folderUid) ?: throw ReaderError.folderNotFound(folderUid)
                 val touched = mutableSetOf<UUID>()
                 val changed = items.findAll(parsed).count { item -> (item.folderId != target.id).also { moveOne(item, target, touched) } }
-                folders.bumpVersion(touched, now())
+                bump(touched, now = now())
                 changed
             }
 
@@ -249,8 +360,35 @@ class SavedService(
 
     private fun removeAll(ids: List<UUID>): Int {
         val from = items.delete(ids)
-        folders.bumpVersion(from, now())
+        bump(from, now = now())
         return from.size
+    }
+
+    /** Parents before their children, siblings by position: the order a client shows the tree in. */
+    private fun inTreeOrder(all: List<SavedFolderSummary>): List<SavedFolderSummary> {
+        val byParent = all.groupBy { it.folder.parentId }
+
+        fun walk(parent: UUID?): List<SavedFolderSummary> = byParent[parent].orEmpty().flatMap { listOf(it) + walk(it.folder.id) }
+        return walk(null)
+    }
+
+    /** Bumps the folders' versions and their ancestors', whose subtree (`descendants=true`) listing changed too. */
+    private fun bump(
+        ids: Collection<UUID>,
+        tree: FolderTree = FolderTree(folders.list()),
+        now: Instant,
+    ) {
+        val all = ids.toSet().flatMapTo(mutableSetOf()) { id -> listOfNotNull(tree.byId[id]).flatMap { tree.ancestorsAndSelf(it) } }
+        folders.bumpVersion(all.map { it.id }, now)
+    }
+
+    private fun requireNameFree(
+        tree: FolderTree,
+        parentId: UUID?,
+        name: String,
+        except: UUID?,
+    ) {
+        if (tree.children(parentId).any { it.id != except && it.name.equals(name, ignoreCase = true) }) throw ReaderError.nameTaken(name)
     }
 
     private fun parse(id: String): UUID? = runCatching { UUID.fromString(id.trim()) }.getOrNull()
@@ -267,5 +405,8 @@ class SavedService(
         const val MAX_BATCH = 100
         private const val MAX_NAME = 100
         private const val MAX_UID = 64
+        const val MAX_DEPTH = 5
+        const val CHILDREN_MOVE_UP = "move_up"
+        const val CHILDREN_DELETE = "delete"
     }
 }

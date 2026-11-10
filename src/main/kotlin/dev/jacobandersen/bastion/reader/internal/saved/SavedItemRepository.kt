@@ -100,11 +100,11 @@ class SavedItemRepository(
         if (ids.isEmpty()) emptyList() else select("i.id in (:ids)").param("ids", ids).query(::map).list()
 
     /**
-     * Up to [limit] + 1 items, newest saved first, after [after]. [folderId] null means every folder; [query] is a
+     * Up to [limit] + 1 items, newest saved first, after [after]. [folderIds] null means every folder; [query] is a
      * web-style full-text search (`websearch_to_tsquery`) over the item's text, name, author and categories.
      */
     fun page(
-        folderId: UUID?,
+        folderIds: Collection<UUID>?,
         query: String?,
         after: SavedCursor?,
         limit: Int,
@@ -115,14 +115,15 @@ class SavedItemRepository(
                 select i.*, i.data::text as data_text, f.uid as folder_uid
                 from reader_saved_items i
                 join reader_saved_folders f on f.id = i.folder_id
-                where (cast(:folder as uuid) is null or i.folder_id = :folder)
+                where (:all or i.folder_id in (:folders))
                   and (cast(:q as text) is null or i.search @@ websearch_to_tsquery('simple', :q))
                   and (cast(:afterAt as timestamptz) is null
                        or (i.saved_at, i.id) < (cast(:afterAt as timestamptz), cast(:afterId as uuid)))
                 order by i.saved_at desc, i.id desc
                 limit :limit
                 """.trimIndent(),
-            ).param("folder", folderId)
+            ).param("all", folderIds == null)
+            .param("folders", folderIds.orEmpty().ifEmpty { listOf(UUID(0, 0)) })
             .param("q", query)
             .param("afterAt", after?.let { Timestamp.from(it.savedAt) })
             .param("afterId", after?.id)
@@ -130,10 +131,10 @@ class SavedItemRepository(
             .query(::map)
             .list()
 
-    fun countInFolder(folderId: UUID): Long =
+    fun countInFolders(folderIds: Collection<UUID>): Long =
         jdbc
-            .sql("select count(*) from reader_saved_items where folder_id = :folder")
-            .param("folder", folderId)
+            .sql("select count(*) from reader_saved_items where folder_id in (:folders)")
+            .param("folders", folderIds.ifEmpty { listOf(UUID(0, 0)) })
             .query(Long::class.java)
             .single()
 

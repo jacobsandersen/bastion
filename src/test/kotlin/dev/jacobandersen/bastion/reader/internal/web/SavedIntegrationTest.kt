@@ -181,12 +181,40 @@ class SavedIntegrationTest {
                 .param("entry", id),
         ).andExpect(status().isOk)
 
-    private fun folder(name: String): String =
+    private fun folder(
+        name: String,
+        parent: String? = null,
+    ): String =
         json(
             mockMvc
-                .perform(post("/reader/v1/saved/folders").auth().contentType(MediaType.APPLICATION_JSON).content(body("name" to name)))
-                .andExpect(status().isCreated),
+                .perform(
+                    post("/reader/v1/saved/folders")
+                        .auth()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(if (parent == null) body("name" to name) else body("name" to name, "parent" to parent)),
+                ).andExpect(status().isCreated),
         )["uid"].asString()
+
+    private fun patchFolder(
+        uid: String,
+        vararg pairs: Pair<String, Any?>,
+    ): ResultActions =
+        mockMvc.perform(
+            patch("/reader/v1/saved/folders/$uid")
+                .auth()
+                .contentType(MediaType.APPLICATION_JSON)
+                // An explicit null (move to the top level) must reach the server, so write the object by hand.
+                .content(
+                    pairs.joinToString(",", "{", "}") { (key, value) ->
+                        "\"$key\":" + (value?.let(mapper::writeValueAsString) ?: "null")
+                    },
+                ),
+        )
+
+    private fun parentOf(uid: String): String? =
+        json(
+            mockMvc.perform(get("/reader/v1/saved/folders").auth()),
+        )["items"].first { it["uid"].asString() == uid }.get("parent").asStringOrNull()
 
     private fun save(
         folder: String,
@@ -263,7 +291,11 @@ class SavedIntegrationTest {
         assertEquals("Read later", first["name"].asString())
         assertEquals(0, first["count"].asInt())
         assertEquals(0, first["version"].asInt())
-        assertEquals("read-later-2", folder("Read later"), "a clashing uid gets a suffix")
+        mockMvc
+            .perform(post("/reader/v1/saved/folders").auth().contentType(MediaType.APPLICATION_JSON).content(body("name" to "read LATER")))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").value("name_taken"))
+        assertEquals("read-later-2", folder("Read later", parent = "read-later"), "a clashing uid gets a suffix")
         val third = folder("Recipes")
         mockMvc
             .perform(post("/reader/v1/saved/folders").auth().contentType(MediaType.APPLICATION_JSON).content(body("name" to "  ")))
@@ -282,8 +314,9 @@ class SavedIntegrationTest {
             .perform(patch("/reader/v1/saved/folders/$third").auth().contentType(MediaType.APPLICATION_JSON).content(body("position" to 0)))
             .andExpect(status().isOk)
         val listed = json(mockMvc.perform(get("/reader/v1/saved/folders").auth()))["items"].toList()
-        assertEquals(listOf(third, "read-later", "read-later-2"), listed.map { it["uid"].asString() })
-        assertEquals(listOf(0, 1, 2), listed.map { it["position"].asInt() })
+        assertEquals(listOf(third, "read-later", "read-later-2"), listed.map { it["uid"].asString() }, "parents come before their children")
+        assertEquals(listOf(0, 1, 0), listed.map { it["position"].asInt() }, "positions order the siblings of one parent")
+        assertEquals(listOf(null, null, "read-later"), listed.map { it.get("parent").asStringOrNull() })
         mockMvc
             .perform(patch("/reader/v1/saved/folders/nope").auth().contentType(MediaType.APPLICATION_JSON).content(body("name" to "Z")))
             .andExpect(status().isBadRequest)
@@ -657,6 +690,225 @@ class SavedIntegrationTest {
         assertEquals(1, savedRows())
     }
 
+    // --- nesting -------------------------------------------------------------------------------------------------------
+
+    @Test
+    fun `folders nest up to five levels, sibling names are unique and a folder cannot move into its own subtree`() {
+        val a = folder("A")
+        val b = folder("B", a)
+        val c = folder("C", b)
+        val d = folder("D", c)
+        val e = folder("E", d)
+        assertEquals(listOf(null, a, b, c, d), listOf(a, b, c, d, e).map(::parentOf))
+        mockMvc
+            .perform(
+                post("/reader/v1/saved/folders").auth().contentType(MediaType.APPLICATION_JSON).content(
+                    body(
+                        "name" to "F",
+                        "parent" to e,
+                    ),
+                ),
+            ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value("invalid_request"))
+        mockMvc
+            .perform(
+                post("/reader/v1/saved/folders").auth().contentType(MediaType.APPLICATION_JSON).content(
+                    body(
+                        "name" to "F",
+                        "parent" to "nope",
+                    ),
+                ),
+            ).andExpect(status().isBadRequest)
+
+        // The same name under another parent is fine, under the same parent it is taken (ignoring case).
+        folder("B")
+        mockMvc
+            .perform(
+                post("/reader/v1/saved/folders").auth().contentType(MediaType.APPLICATION_JSON).content(
+                    body(
+                        "name" to "b",
+                        "parent" to a,
+                    ),
+                ),
+            ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").value("name_taken"))
+
+        // Cycles and depth.
+        patchFolder(a, "parent" to a).andExpect(status().isBadRequest)
+        patchFolder(a, "parent" to e).andExpect(status().isBadRequest)
+        patchFolder(a, "parent" to c).andExpect(status().isBadRequest)
+        val solo = folder("Solo")
+        patchFolder(solo, "parent" to d).andExpect(status().isOk).andExpect(jsonPath("$.parent").value(d))
+        patchFolder(solo, "parent" to e).andExpect(status().isBadRequest)
+        patchFolder(solo, "parent" to null).andExpect(status().isOk)
+        val other = folder("Other")
+        patchFolder(a, "parent" to other).andExpect(status().isBadRequest) // other > a > b > c > d > e is 6 deep
+        patchFolder(b, "parent" to other).andExpect(status().isOk) // other > b > c > d > e is 5 deep
+        patchFolder(other, "parent" to d).andExpect(status().isBadRequest)
+        patchFolder(b, "parent" to null).andExpect(status().isConflict) // the top level already has a "B"
+        patchFolder(b, "name" to "B2", "parent" to null).andExpect(status().isOk).andExpect(jsonPath("$.parent").doesNotExist())
+        assertEquals(null, parentOf(b))
+        // A move onto a taken name is refused; a rename is checked among the new siblings too.
+        patchFolder(b, "parent" to other).andExpect(status().isOk)
+        val b2 = folder("B2")
+        patchFolder(b2, "parent" to other).andExpect(status().isConflict)
+        patchFolder(b2, "name" to "Zed", "parent" to other).andExpect(status().isOk).andExpect(jsonPath("$.name").value("Zed"))
+        patchFolder(b2, "position" to 0).andExpect(status().isOk)
+        val siblings =
+            json(
+                mockMvc.perform(get("/reader/v1/saved/folders").auth()),
+            )["items"].toList().filter { it.get("parent").asStringOrNull() == other }
+        assertEquals(listOf(b2, b), siblings.sortedBy { it["position"].asInt() }.map { it["uid"].asString() })
+        mockMvc
+            .perform(patch("/reader/v1/saved/folders/$a").auth().contentType(MediaType.APPLICATION_JSON).content("""{"parent": 5}"""))
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
+    fun `descendants lists a folder with its subfolders and ancestors' versions follow the subtree`() {
+        pages["/tree"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/tree")
+        val top = folder("Top")
+        val mid = folder("Mid", top)
+        val leaf = folder("Leaf", mid)
+        val sibling = folder("Sibling", top)
+        val ids = saved(channel, "p1", into = top) + saved(channel, "p2", into = mid) + saved(channel, "p3", into = leaf)
+
+        fun listed(
+            folder: String,
+            descendants: Boolean?,
+        ) = json(
+            mockMvc
+                .perform(
+                    get("/reader/v1/saved/items").auth().param("folder", folder).apply { descendants?.let { param("descendants", "$it") } },
+                ).andExpect(status().isOk),
+        )["items"].toList().map { it["_id"].asString() }.toSet()
+
+        assertEquals(setOf(ids[0]), listed(top, null))
+        assertEquals(setOf(ids[0]), listed(top, false))
+        assertEquals(ids.toSet(), listed(top, true))
+        assertEquals(setOf(ids[1], ids[2]), listed(mid, true))
+        assertEquals(setOf(ids[2]), listed(leaf, true))
+        assertEquals(emptySet<String>(), listed(sibling, true))
+        assertEquals(1, savedItems(top).size)
+        assertEquals(3, savedItems().size, "without a folder every folder is read")
+
+        // An item change bumps its folder and every ancestor, not the unrelated sibling.
+        val before = listOf(top, mid, leaf, sibling).map(::version)
+        mockMvc.perform(delete("/reader/v1/saved/items/${ids[2]}").auth()).andExpect(status().isOk)
+        assertEquals(listOf(before[0] + 1, before[1] + 1, before[2] + 1, before[3]), listOf(top, mid, leaf, sibling).map(::version))
+        // Moving a subtree changes the subtree membership of both the old and the new ancestors.
+        val moving = listOf(top, mid, leaf, sibling).map(::version)
+        patchFolder(mid, "parent" to sibling).andExpect(status().isOk)
+        val after = listOf(top, mid, leaf, sibling).map(::version)
+        assertEquals(moving[0] + 1, after[0])
+        assertEquals(moving[3] + 1, after[3])
+        assertEquals(setOf(ids[1]), listed(sibling, true))
+        assertEquals(setOf(ids[0]), listed(top, false))
+        assertEquals(setOf(ids[0], ids[1]), listed(top, true))
+    }
+
+    @Test
+    fun `deleting a folder with subfolders needs an explicit choice for them`() {
+        pages["/kids"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"), hEntry("p3", "Three"))
+        val channel = newChannel()
+        follow(channel, "/kids")
+        val root = folder("Root")
+        val mid = folder("Mid", root)
+        val leaf = folder("Leaf", mid)
+        val keep = folder("Keep")
+        saved(channel, "p1", into = mid)
+        saved(channel, "p2", into = leaf)
+        saved(channel, "p3", into = keep)
+
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$mid").auth().param("items", "1"))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").value("folder_has_children"))
+            .andExpect(jsonPath("$.children").value(1))
+        mockMvc.perform(delete("/reader/v1/saved/folders/$mid").auth().param("children", "sideways")).andExpect(status().isBadRequest)
+        assertEquals(3, savedRows())
+
+        // move_up: the subfolder goes to the deleted folder's parent; the folder's own items need their own answer.
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$mid").auth().param("children", "move_up"))
+            .andExpect(status().isBadRequest)
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$mid").auth().param("children", "move_up").param("items", "2"))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").value("folder_changed"))
+            .andExpect(jsonPath("$.items").value(1))
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$mid").auth().param("children", "move_up").param("items", "1"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deleted").value(1))
+            .andExpect(jsonPath("$.folders").value(1))
+        assertEquals(root, parentOf(leaf))
+        assertEquals(2, savedRows())
+        assertEquals(1, savedItems(leaf).size, "the subfolder keeps its items")
+
+        // delete: the whole subtree goes, with every item in it, for the quoted count of the whole subtree.
+        val sub = folder("Sub", leaf)
+        saved(channel, "p1", into = sub)
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$root").auth().param("children", "delete").param("items", "1"))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.items").value(2))
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$root").auth().param("children", "delete").param("move_to", sub))
+            .andExpect(status().isBadRequest)
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$root").auth().param("children", "delete").param("items", "2"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deleted").value(2))
+            .andExpect(jsonPath("$.folders").value(3))
+        assertEquals(1, savedRows())
+        assertEquals(
+            listOf(keep),
+            json(mockMvc.perform(get("/reader/v1/saved/folders").auth()))["items"].toList().map { it["uid"].asString() },
+        )
+    }
+
+    @Test
+    fun `deleting a subtree can move all its items elsewhere and move_up refuses a name clash`() {
+        pages["/mv2"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"))
+        val channel = newChannel()
+        follow(channel, "/mv2")
+        val root = folder("Root")
+        val child = folder("Child", root)
+        val dest = folder("Dest")
+        saved(channel, "p1", into = root)
+        saved(channel, "p2", into = child)
+        saved(channel, "p1", into = dest)
+
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$root").auth().param("children", "delete").param("move_to", dest))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.moved").value(1))
+            .andExpect(jsonPath("$.deleted").value(1))
+            .andExpect(jsonPath("$.folders").value(2))
+        assertEquals(setOf("$base/p1", "$base/p2"), savedItems(dest).map { it["url"].asString() }.toSet())
+        assertEquals(2, savedRows())
+
+        // Moving children up onto a sibling name that exists is refused and deletes nothing.
+        val parent = folder("Parent")
+        val middle = folder("Middle", parent)
+        folder("Twin", middle)
+        folder("Twin", parent)
+        mockMvc
+            .perform(delete("/reader/v1/saved/folders/$middle").auth().param("children", "move_up"))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").value("name_taken"))
+        assertEquals(
+            middle,
+            json(mockMvc.perform(get("/reader/v1/saved/folders").auth()))["items"].toList().map { it["uid"].asString() }.first {
+                it ==
+                    middle
+            },
+        )
+    }
+
     // --- search --------------------------------------------------------------------------------------------------------
 
     @Test
@@ -815,3 +1067,5 @@ class SavedIntegrationTest {
         assertEquals(0, json(mockMvc.perform(get("/reader/v1/saved/folders").auth()))["items"].size())
     }
 }
+
+private fun JsonNode?.asStringOrNull(): String? = if (this == null || isNull || isMissingNode) null else asString()

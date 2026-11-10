@@ -45,17 +45,6 @@ data class BulkDeleteScopeRequest(
     val unfollowed: Boolean? = null,
 )
 
-/** The body of `POST /reader/v1/saved/folders`. */
-data class SavedFolderCreateRequest(
-    val name: String? = null,
-)
-
-/** The body of `PATCH /reader/v1/saved/folders/{uid}`: a new [name] and/or a new zero-based [position]. */
-data class SavedFolderUpdateRequest(
-    val name: String? = null,
-    val position: Int? = null,
-)
-
 /** The body of `POST /reader/v1/saved/items`: save [entry] of [channel] into [folder]. */
 data class SavedItemCreateRequest(
     val folder: String? = null,

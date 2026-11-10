@@ -51,6 +51,16 @@ class ReaderError(
             mapOf("items" to items, "expected" to expected),
         )
 
+        fun nameTaken(name: String) = ReaderError(HttpStatus.CONFLICT, "name_taken", "A folder named '$name' already exists in that place")
+
+        fun folderHasChildren(children: Int) =
+            ReaderError(
+                HttpStatus.CONFLICT,
+                "folder_has_children",
+                "The folder has $children subfolders; give 'children' as 'move_up' or 'delete'",
+                mapOf("children" to children),
+            )
+
         fun channelNotFound(uid: String) = ReaderError(HttpStatus.NOT_FOUND, "not_found", "Channel '$uid' does not exist")
     }
 }

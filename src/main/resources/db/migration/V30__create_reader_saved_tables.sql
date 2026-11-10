@@ -5,11 +5,17 @@ create table reader_saved_folders
     id         uuid primary key,
     uid        text        not null unique,
     name       text        not null,
+    parent_id  uuid references reader_saved_folders (id) on delete cascade,
     position   integer     not null,
     version    bigint      not null default 0,
     created_at timestamptz not null,
     updated_at timestamptz not null
 );
+
+-- Sibling folders have unique names (ignoring case); `position` orders the siblings of one parent.
+create unique index uq_reader_saved_folder_name
+    on reader_saved_folders (coalesce(parent_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(name));
+create index idx_reader_saved_folder_parent on reader_saved_folders (parent_id);
 
 create table reader_saved_items
 (

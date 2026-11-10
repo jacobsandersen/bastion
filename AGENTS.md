@@ -82,10 +82,12 @@ When updating this file, preserve this bar for all agents and keep entries conci
     have no foreign key to `microsub_*`, so no entry lifecycle event (remove marker, feed drop, bulk delete, block,
     webmention retraction, unfollow, channel delete) reaches them; only an explicit item or folder delete does, and
     nothing purges them. They cannot be re-fetched: back up the database. One folder per item; a folder holds a post
-    (canonical url, else the origin entry id) once. The copy is taken server-side through
+    (canonical url, else the origin entry id) once. Folders nest (`parent`, at most 5 levels; sibling names unique
+    ignoring case; a cycle or too deep is 400, a taken name 409 `name_taken`); deleting one with subfolders needs
+    `children=move_up|delete` (409 `folder_has_children`), and `GET /saved/items?descendants=true` reads a subtree. The copy is taken server-side through
     `EntrySnapshotQueryService` (also for deleted markers, so a deleted entry can be rescued) and is never refreshed.
     Reads, save, move and remove need `read`; folder create/rename/delete also `channels`. Every item change bumps
-    the folder `version`, which clients sync by. `GET /storage` has a separate `saved` member (always current);
+    the folder's and each ancestor's `version`, which clients sync by (so a version covers the subtree). `GET /storage` has a separate `saved` member (always current);
     `microsub.on_disk_bytes` and the warnings never count saved data. Saved items ignore mute/block.
 - `api` exposes nothing; it depends only on `post::post-read` and `webmention::webmention-read`.
 - `config` exposes `config::config-security`; this includes the permissive `publicCorsConfigurationSource` used by
