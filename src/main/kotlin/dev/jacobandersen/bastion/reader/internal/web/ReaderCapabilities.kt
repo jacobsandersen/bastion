@@ -44,3 +44,22 @@ data class BulkDeleteScopeRequest(
     /** Only entries left behind by a feed that was unfollowed. */
     val unfollowed: Boolean? = null,
 )
+
+/** The body of `POST /reader/v1/saved/items`: save [entry] of [channel] into [folder]. */
+data class SavedItemCreateRequest(
+    val folder: String? = null,
+    val channel: String? = null,
+    val entry: String? = null,
+)
+
+/** The body of `PATCH /reader/v1/saved/items/{id}`. */
+data class SavedItemMoveRequest(
+    val folder: String? = null,
+)
+
+/** The body of `POST /reader/v1/saved/items/batch`: [op] is `move` (needs [folder]) or `remove`. */
+data class SavedBatchRequest(
+    val op: String? = null,
+    val ids: List<String>? = null,
+    val folder: String? = null,
+)

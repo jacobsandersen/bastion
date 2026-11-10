@@ -274,6 +274,26 @@ class EntryRepository(
             .query(::map)
             .list()
 
+    /** One entry of the channel, deleted markers included; null when it is not (or no longer) there. */
+    fun findInChannel(
+        channelId: UUID,
+        id: UUID,
+    ): EntryRow? =
+        jdbc
+            .sql(
+                """
+                select e.id, e.channel_id, e.created_at, e.published, e.is_read, e.removed_at, e.data::text as data,
+                       f.id as feed_id, f.url as feed_url, f.name as feed_name, f.photo as feed_photo
+                from microsub_entries e
+                left join microsub_feeds f on f.id = e.feed_id
+                where e.channel_id = :channel and e.id = :id
+                """.trimIndent(),
+            ).param("channel", channelId)
+            .param("id", id)
+            .query(::map)
+            .optional()
+            .orElse(null)
+
     /** Marks entries deleted. Their content stays, see [EntryDeletionService]. Already deleted or unknown ids are skipped. */
     fun markRemoved(
         channelId: UUID,
