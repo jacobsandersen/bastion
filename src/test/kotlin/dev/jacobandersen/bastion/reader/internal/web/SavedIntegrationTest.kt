@@ -719,6 +719,57 @@ class SavedIntegrationTest {
             .andExpect(status().isBadRequest)
     }
 
+    // --- storage -------------------------------------------------------------------------------------------------------
+
+    private fun storage(): JsonNode = json(mockMvc.perform(get("/reader/v1/storage").auth("readonly")).andExpect(status().isOk))
+
+    @Test
+    fun `storage reports saved data as its own block and leaves the microsub figures alone`() {
+        pages["/st"] = "text/html" to hFeed(hEntry("p1", "One"), hEntry("p2", "Two"))
+        val channel = newChannel()
+        follow(channel, "/st")
+        val a = folder("Alpha")
+        val b = folder("Beta")
+
+        val empty = storage()["saved"]
+        assertEquals(0, empty["items"].asInt())
+        assertEquals(2, empty["folders"].asInt())
+        assertEquals(0, empty["payload_bytes"].asLong())
+        assertTrue(empty["on_disk_bytes"].asLong() > 0, "the empty tables and their indexes still occupy pages")
+
+        val before = storage()["microsub"]
+        saved(channel, "p1", "p2", into = a)
+        saved(channel, "p1", into = b)
+        val after = storage()
+
+        val block = after["saved"]
+        assertEquals(3, block["items"].asInt())
+        assertEquals(2, block["folders"].asInt())
+        assertTrue(block["payload_bytes"].asLong() > 0)
+        assertTrue(block["on_disk_bytes"].asLong() >= block["payload_bytes"].asLong() / 2)
+        val byFolder = block["by_folder"].toList().associateBy { it["uid"].asString() }
+        assertEquals(2, byFolder.getValue(a)["items"].asInt())
+        assertEquals("Alpha", byFolder.getValue(a)["name"].asString())
+        assertEquals(1, byFolder.getValue(b)["items"].asInt())
+        assertEquals(block["payload_bytes"].asLong(), byFolder.values.sumOf { it["bytes"].asLong() })
+        assertTrue(byFolder.getValue(a)["bytes"].asLong() > byFolder.getValue(b)["bytes"].asLong())
+        assertEquals(
+            byFolder.getValue(a)["bytes"].asLong(),
+            json(mockMvc.perform(get("/reader/v1/saved/folders").auth()))["items"].first { it["uid"].asString() == a }["bytes"].asLong(),
+        )
+
+        // Saving changes nothing in the microsub figures, whose on-disk size covers the microsub tables only.
+        val microsub = after["microsub"]
+        assertEquals(before["on_disk_bytes"].asLong(), microsub["on_disk_bytes"].asLong())
+        assertEquals(before["payload_bytes"].asLong(), microsub["payload_bytes"].asLong())
+        assertEquals(before["entries"].asLong(), microsub["entries"].asLong())
+        assertEquals(before["unread"].asLong(), microsub["unread"].asLong())
+        assertEquals(before["removed"].asLong(), microsub["removed"].asLong())
+        assertEquals(1, after["warnings"].size(), "only the microsub threshold warns")
+        assertTrue(after["database_bytes"].asLong() >= block["on_disk_bytes"].asLong())
+        assertFalse(microsub.has("saved"))
+    }
+
     // --- deleting folders ----------------------------------------------------------------------------------------------
 
     @Test

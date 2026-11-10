@@ -25,6 +25,14 @@ data class FolderDeletion(
     val moved: Int,
 )
 
+/** What the saved folders hold. [payloadBytes] is the row size of the items; [onDiskBytes] also counts indexes and free space. */
+data class SavedStorage(
+    val items: Long,
+    val folders: List<SavedFolderSummary>,
+    val payloadBytes: Long,
+    val onDiskBytes: Long,
+)
+
 /**
  * The owner's saved folders: private, frozen copies of entries that live in their own tables, apart from Microsub
  * channels and feeds. Nothing here reads or writes the microsub tables; a copy is taken once through
@@ -38,9 +46,17 @@ class SavedService(
     private val items: SavedItemRepository,
     private val snapshots: EntrySnapshotQueryService,
     private val slugify: Slugify,
+    private val stats: SavedStatsRepository,
 ) {
     @Transactional(readOnly = true)
     fun listFolders(): List<SavedFolderSummary> = folders.summaries()
+
+    /** Counts and sizes of everything saved, computed on each call: the tables hold a handful of rows per folder to scan. */
+    @Transactional(readOnly = true)
+    fun storage(): SavedStorage {
+        val summaries = folders.summaries()
+        return SavedStorage(summaries.sumOf { it.count }, summaries, summaries.sumOf { it.bytes }, stats.onDiskBytes())
+    }
 
     @Transactional
     fun createFolder(name: String?): SavedFolderSummary {

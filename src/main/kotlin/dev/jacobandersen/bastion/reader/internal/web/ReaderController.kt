@@ -12,6 +12,7 @@ import dev.jacobandersen.bastion.microsub.feeds.FeedStateQueryService
 import dev.jacobandersen.bastion.microsub.stats.StorageQueryService
 import dev.jacobandersen.bastion.microsub.stats.UnreadQueryService
 import dev.jacobandersen.bastion.reader.internal.ReaderApi
+import dev.jacobandersen.bastion.reader.internal.saved.SavedService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.CacheControl
 import org.springframework.http.MediaType
@@ -45,6 +46,7 @@ class ReaderController(
     private val bulkDelete: EntryBulkDeleteService,
     private val unreadTotals: UnreadQueryService,
     private val storageStats: StorageQueryService,
+    private val saved: SavedService,
 ) {
     private val capabilities =
         ReaderCapabilities(
@@ -220,13 +222,16 @@ class ReaderController(
     }
 
     /**
-     * What Microsub stores: counts and bytes per channel and feed, overall, plus the database size and any configured
-     * warning that is exceeded. Computed at most once per cache period on each replica (`computed_at`, `ttl_seconds`).
+     * What Microsub stores (the `microsub` member): counts and bytes per channel and feed, overall, plus the database size
+     * and any configured warning that is exceeded. Computed at most once per cache period on each replica (`computed_at`,
+     * `ttl_seconds`). The `saved` member reports the saved folders on their own and is always current: nothing in
+     * `microsub` (its `on_disk_bytes`, its warnings) counts saved data, though `database_bytes` includes it.
      */
     @GetMapping("/storage")
     fun storage(): ResponseEntity<Map<String, Any?>> {
         requireScope()
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(storageStats.report().toBody())
+        val body = storageStats.report().toBody() + ("saved" to saved.storage().toBody())
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body)
     }
 
     private fun view(feed: FeedDetails): Map<String, String> =
